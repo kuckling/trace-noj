@@ -48,21 +48,7 @@ Consejo: en una traza real, borra o cambia los números y las IP antes de pegarl
 
 Regla de honestidad: desde la señalización **no se puede probar** el audio en un solo sentido; la app lo marca como **sospecha**, nunca como certeza. Para confirmarlo hay que ver el RTP (Wireshark) o preguntar qué lado no escuchaba.
 
-## Cómo publicarla en GitHub Pages
-
-1. Crea un repositorio público en GitHub (nombre sugerido: `trace-noj`).
-2. Sube `index.html`, `README.md`, `LICENSE` y las imágenes (`tracenoj-icono.png`, `tracenoj-presentacion-v5.png`) a la raíz del repositorio.
-3. En el repositorio: **Settings → Pages → Source: Deploy from a branch → Branch: main → Save**.
-4. En 1–2 minutos la app estará en `https://tu-usuario.github.io/trace-noj/`.
-
-## Archivos
-
-- `index.html` — la aplicación completa (HTML + CSS + JS en un solo archivo).
-- `README.md` — este archivo.
-- `LICENSE` — CC BY-NC-SA 4.0.
-- `tracenoj-presentacion-v5.png` — imagen de presentación (pez kay).
-- `tracenoj-icono.png` — icono del pez kay.
 
 ## Autor
 
-Marlon Estuardo Alvarado Kuckling · Guatemala · CC BY-NC-SA 4.0
+Ing. Marlon Estuardo Alvarado Kuckling · Guatemala · CC BY-NC-SA 4.0
