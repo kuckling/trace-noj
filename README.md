@@ -18,18 +18,26 @@ Una aplicación para técnicos de telcos que no saben interpretar una traza. Peg
 
 Detecta sola si la traza es **SIP**, **Q.931** o un **log de FreeSWITCH**. Si no reconoce el formato, lo dice con honestidad en vez de inventar.
 
-Además trae un **Laboratorio** con 7 casos ficticios para practicar (llamada exitosa, ocupado, sin circuito causa 34, audio en un solo sentido, registro rechazado 401/403 estilo Dinstar, tiempo agotado 408 estilo syslog, sin servicio por TLS estilo FreeSWITCH) y una pestaña de **Causas** con las tablas Q.931 y SIP.
+Además trae un **Laboratorio** con 8 casos ficticios para practicar (llamada exitosa, ocupado, sin circuito causa 34, audio en un solo sentido, registro rechazado 401/403 estilo Dinstar, tiempo agotado 408 estilo syslog, sin servicio por TLS estilo FreeSWITCH, reto de autenticación 401 con reintento que sí funciona) y una pestaña de **Causas** con las tablas Q.931 y SIP.
 
 ## Cómo se usa
 
 1. Abre `index.html` en el navegador (doble clic, sin instalar nada).
-2. Pestaña **Intérprete**: pega la traza en el cuadro de texto y pulsa **Interpretar traza**. También puedes cargar un ejemplo del desplegable.
+2. Pestaña **Intérprete**: pega la traza en el cuadro de texto y pulsa **Interpretar traza**. También puedes cargar un ejemplo del desplegable. Si la captura trae varias llamadas, elige una en el menú 📞 **Llamada**; si el log trae SIP y Q.931 juntos, elige el formato en el desplegable **Formato**.
 3. Pestaña **Laboratorio**: lee cada caso, responde la pregunta en tu cabeza y pulsa **Ver respuesta**.
 4. Pestaña **Causas**: consulta rápida de códigos SIP y causas Q.931.
 
 Consejo: en una traza real, borra o cambia los números y las IP antes de pegarla. La app no los necesita para explicar el flujo, y ninguna traza sale de tu equipo: todo se procesa en el navegador.
 
-## Lo que entiende (v1.4)
+## Lo que entiende (v1.6)
+
+- **Reto de autenticación (401/407):** un 401 o 407 seguido de un reintento con credenciales que llega al 200 OK ya no se reporta como falla: el diagnóstico dice que la llamada se estableció (o que el registro se completó) y anota que hubo un reto superado. Un REGISTER con 200 OK ahora dice "El registro se completó" en vez de "falta el ACK".
+- **Causa Q.931 estilo Cisco (`Cause i = 0x8090`):** ahora se lee: dos bytes, el último es la causa (0x90 → 16, 0xA2 → 34). También vale con los bytes separados por espacio (`0x80 0x90`).
+- **Solo keepalives:** una captura con solo mensajes OPTIONS dice que no hay ninguna llamada que analizar, en vez de analizar los keepalives como si fueran una llamada.
+- **Laboratorio, caso 8:** reto de autenticación 401 → reintento con credenciales → 200 OK: la llamada sí se completa.
+
+- **Selector de llamada**: si la captura trae varias llamadas (Call-ID distintos), un menú las lista con su resultado ("Llamada 1 · 5550101 → 5550202 · La llamada se completó normalmente") y al elegir una muestra su flujo y su diagnóstico. Sin elegir, se analiza la del primer INVITE, como antes.
+- **Selector de formato**: Automático (detecta sola), SIP o Q.931. Forzar Q.931 lee solo el lado Q.931 de un log mixto de gateway (SIP + Q.931 en el mismo archivo); en Automático, si hay SIP, gana el SIP.
 
 - 📟 **Logs de FreeSWITCH (sofia)**: extrae el SIP crudo de los bloques `recv N bytes from ...` / `send N bytes to ...` (con su línea de guiones de cierre), con prefijo propio de FreeSWITCH (`2026-11-25 08:10:01.123456 [DEBUG] sofia.c:1234`) o envuelto en syslog (`Nov 25 08:10:01 host freeswitch[4600]:`). La escalera usa los actores reales (equipo remoto ↔ FreeSWITCH) y la dirección recv/send. Si el fragmento solo trae líneas de diagnóstico (sin SIP), no dice "no reconozco": convierte las líneas en pistas — `TLS handshake failed` → posible problema de certificados/TLS; `parse domain ... failed` → posible problema de DNS o de configuración del dominio. Las líneas de ruido (`agent_timer` y similares) se ignoran.
 - 🏷️ **Prefijos de log**: acepta trazas reales con timestamps (`[2026-11-25 08:00:00.123]`, `Nov 25 08:05:12`), IP:puerto, niveles (INFO/DEBUG), etiquetas `[SIP]` o nombre del equipo (syslog) al inicio de línea, y prefijos `TX:`/`RX:` antes del mensaje. La detección no se rompe por el prefijo.
