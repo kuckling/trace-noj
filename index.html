@@ -345,10 +345,19 @@ function stripLogPrefix(line){
   const hostGuard = '(?!(?:' + LOG_METHODS + '|SIP\\/2\\.0|' + LOG_Q931 + '|' + LOG_HEADERS + ')\\b)';
   do {
     prev = s;
+    // Dinstar mpe_q931: "ROS#19 09:27:46.150 mpe_q931: <  5>  [   INFO] Q931<-LCM, MT_SETUP..."
+    // o "19 09:27:46.150 mpe_q931: < 11>  [   INFO] Q931->CC, CC_SETUP_IND:..."
+    s = s.replace(/^\s*(?:[A-Za-z]*#\d+\s+)?(?:\d{1,2}\s+)?\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+mpe_q931:\s*<\s*\d+>\s*\[\s*[A-Za-z]+\s*\]\s*/i, '');
+    // Synway: "Local --> Remote ISDN(User) SETUP..." / "Local --> 203.0.113.10 SIP SIP/2.0 180 Ringing"
+    // / "203.0.113.10 --> Local SIP ACK ...". Se convierte en TX:/RX: para
+    // que el parser conserve la dirección (Local envía = TX, Local recibe = RX).
+    s = s.replace(new RegExp('^\\s*(Local|Remote|\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d{1,5})?)\\s*(?:-->|->|→|=>)\\s*(?:Local|Remote|\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d{1,5})?)\\s*(?:ISDN\\s*\\(User\\)\\s+|SIP\\s+)?(?=(' + contentStart + '))', 'i'), function(m, src){ return /^local$/i.test(src) ? 'TX: ' : 'RX: '; });
     // [2026-11-25 08:00:00.123] o [2026-11-25T08:00:00Z]
-    s = s.replace(/^\s*\[\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*/, '');
-    // 2026-11-25 08:00:00.123
-    s = s.replace(/^\s*\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '');
+    s = s.replace(/^\s*\[\d{4}[-/]\d{2}[-/]\d{2}[T ]+\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*/, '');
+    // 2026-11-25 08:00:00.123 (Synway pone dos espacios: 1970-01-02  23:51:17.862)
+    s = s.replace(/^\s*\d{4}[-/]\d{2}[-/]\d{2}[T ]+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '');
+    // 01/02/1970 23:51:17:857 (Synway: día/mes/año, y los milisegundos con dos puntos)
+    s = s.replace(/^\s*\d{1,2}[-/]\d{1,2}[-/]\d{4}\s+\d{2}:\d{2}:\d{2}(?:[.:]\d+)?\s*/, '');
     // 08:00:00.123
     s = s.replace(/^\s*\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '');
     // Nov 25 08:00:00 (syslog)
@@ -454,6 +463,14 @@ function extractFreeSwitchDiagnostics(text){
   return found;
 }
 
+/* Dinstar mpe_q931 escribe los tipos como MT_SETUP, MT_CALL_PROCEEDING,
+   MT_CONNECT_ACKNOWLEDGE...: el guion bajo hace que \bSETUP\b no los vea
+   (la _ es carácter de palabra). Se quita el prefijo MT_ y los guiones
+   bajos se vuelven espacios, solo dentro del token MT_... */
+function normalizeMtType(text){
+  return text.replace(/\bMT_([A-Za-z_]+)/g, function(m, inner){ return inner.replace(/_/g, ' '); });
+}
+
 /* ---------------- Detección de formato ---------------- */
 
 /* Recibe las líneas YA limpias. */
@@ -462,7 +479,7 @@ function detectFormatFromLines(lines){
   if (/SIP\/2\.0/i.test(clean)) return 'SIP';
   if (new RegExp('^\\s*(' + SIP_METHODS.join('|') + ')\\s+\\S+\\s+SIP/2\\.0', 'im').test(clean)) return 'SIP';
   const q = Q931_MESSAGES.some(function(t){
-    return new RegExp('\\b' + t.replace(/ /g,'\\s+') + '\\b', 'i').test(clean);
+    return new RegExp('\\b' + t.replace(/ /g,'\\s+') + '\\b', 'i').test(normalizeMtType(clean));
   });
   if (q) return 'Q931';
   if (/cause\s*(value)?\s*[:=]?\s*\[?\d/i.test(clean)) return 'Q931';
@@ -475,32 +492,59 @@ function detectFormat(text){
 
 /* ---------------- Parser SIP ---------------- */
 
+/* ¿El Local es el lado llamado (B)? Se decide por el primer INVITE: si el
+   Local lo recibió (RX:/RECV:), el Local es B. Si no hay INVITE (fragmento
+   que empieza en el 180, como el de Synway), se mira si el Local responde
+   con 1xx/2xx a un INVITE: también es B. Sin evidencia, es A (como antes).
+   FreeSWITCH (FS-*) y las líneas sin prefijo no cuentan: su mapeo ya es
+   el correcto y no se toca. */
+function localIsCalledSide(msgs){
+  const invite = msgs.find(function(m){ return m.method === 'INVITE'; });
+  if (invite) return invite.dirSrc === 'rx';
+  const byeIdx = msgs.findIndex(function(m){ return m.method === 'BYE'; });
+  for (let i = 0; i < msgs.length; i++){
+    const m = msgs[i];
+    if (m.kind !== 'response') continue;
+    const code = +m.code;
+    if (code < 100 || code >= 300) continue;
+    if (byeIdx >= 0 && i > byeIdx) continue; // el 200 del BYE no es contestación
+    if (m.cseq && !/INVITE\s*$/i.test(m.cseq)) continue; // el CSeq dice que no es respuesta a INVITE
+    if (m.dirSrc === 'tx') return true;
+    if (m.dirSrc === 'rx') return false;
+  }
+  return false;
+}
+
 /* Recibe las líneas YA limpias. */
 function parseSIPFromLines(lines, selectedCallId){
   const messages = [];
   let cur = null, inSdp = false;
-  const reqRe = new RegExp('^\\s*(' + SIP_METHODS.join('|') + ')\\s+(\\S+)\\s+SIP/2\\.0', 'i');
-  const statusRe = /^\s*SIP\/2\.0\s+(\d{3})(?:\s+(.*))?$/i;
+  const reqRe = new RegExp('^\\s*(?:SIP\\s+)?(' + SIP_METHODS.join('|') + ')\\s+(\\S+)\\s+SIP/2\\.0', 'i');
+  const statusRe = /^\s*(?:SIP\s+)?SIP\/2\.0\s+(\d{3})(?:\s+(.*))?$/i;
   for (const raw of lines){
     const line = raw.trim();
     if (!line){ inSdp = true; continue; }
     // Prefijo de dirección del log (TX:/RX:/SEND:/RECV:) antes del mensaje.
     // En un log de FreeSWITCH, FS-RECV es lo que llega al FreeSWITCH
     // (del equipo remoto hacia él) y FS-SEND lo que él envía.
-    let dirHint = null, fromFS = false;
+    let dirHint = null, fromFS = false, dirSrc = null;
     const probe = line.replace(/^(TX|RX|SEND|RECV|FS-RECV|FS-SEND)\s*[:>]\s*/i, function(_, p){
       fromFS = /^FS-/i.test(p);
       dirHint = /^(TX|SEND|FS-RECV)$/i.test(p) ? 'AtoB' : 'BtoA';
+      // De dónde vino la dirección: 'tx' (el Local envía), 'rx' (el Local
+      // recibe), 'fs' (FreeSWITCH) o null (sin prefijo). Sirve para saber
+      // de qué lado está el Local cuando la escalera sale al revés.
+      dirSrc = /^FS-/i.test(p) ? 'fs' : (/^(TX|SEND)$/i.test(p) ? 'tx' : 'rx');
       return '';
     });
     let m = probe.match(reqRe);
     if (m){
-      cur = {kind:'request', method:m[1].toUpperCase(), uri:m[2], dir:dirHint || 'AtoB', fs:fromFS, from:'', to:'', callId:'', cseq:'', contact:'', sdp:{media:'', mediaPort:null, mediaRejected:false, direction:'', connIP:'', codecs:[], rtpmap:{}}};
+      cur = {kind:'request', method:m[1].toUpperCase(), uri:m[2], dir:dirHint || 'AtoB', dirSrc:dirSrc, fs:fromFS, from:'', to:'', callId:'', cseq:'', contact:'', sdp:{media:'', mediaPort:null, mediaRejected:false, direction:'', connIP:'', codecs:[], rtpmap:{}}};
       messages.push(cur); inSdp = false; continue;
     }
     m = probe.match(statusRe);
     if (m){
-      cur = {kind:'response', code:m[1], reason:(m[2] || '').trim(), dir:dirHint || 'BtoA', fs:fromFS, from:'', to:'', callId:'', cseq:'', contact:'', sdp:{media:'', mediaPort:null, mediaRejected:false, direction:'', connIP:'', codecs:[], rtpmap:{}}};
+      cur = {kind:'response', code:m[1], reason:(m[2] || '').trim(), dir:dirHint || 'BtoA', dirSrc:dirSrc, fs:fromFS, from:'', to:'', callId:'', cseq:'', contact:'', sdp:{media:'', mediaPort:null, mediaRejected:false, direction:'', connIP:'', codecs:[], rtpmap:{}}};
       messages.push(cur); inSdp = false; continue;
     }
     if (!cur) continue;
@@ -560,6 +604,17 @@ function parseSIPFromLines(lines, selectedCallId){
   // Solo keepalives: no hay ninguna llamada que analizar.
   if (!working.length && optionsFiltered > 0){
     return {format:'options-only', messages:[], optionsFiltered: optionsFiltered, keyData:{}};
+  }
+  // El Local puede ser el lado llamado (B): en un log de gateway el
+  // primer INVITE lo recibe el Local (RX:) o el Local responde con
+  // 1xx/2xx. En ese caso las flechas TX:/RX: se invierten: lo que envía
+  // el Local va de B a A y lo que recibe va de A a B. Solo se invierten
+  // los mensajes con prefijo TX:/RX:; los de FreeSWITCH y los sin prefijo
+  // ya tienen la dirección correcta y no se tocan.
+  if (localIsCalledSide(working)){
+    for (const m of working){
+      if (m.dirSrc === 'tx' || m.dirSrc === 'rx') m.dir = m.dir === 'AtoB' ? 'BtoA' : 'AtoB';
+    }
   }
   // Call-ID distintos (sin contar OPTIONS): ¿viene más de una llamada?
   const callOrder = [];
@@ -669,9 +724,18 @@ function detectSipActors(messages){
 /* ---------------- Parser Q.931 ---------------- */
 
 function extractCause(line){
+  // Dinstar mpe_q931: IE_CAUSE 08 02 80 90 — el último byte es la causa
+  // (0x90 & 0x7F = 16). Los bytes anteriores son el IE y su longitud.
+  // Va primero: si no, "CAUSE 08" caería en la regla decimal y daría 8.
+  let m = line.match(/IE_CAUSE\s+((?:[0-9A-Fa-f]{2}\s*)+)/i);
+  if (m){
+    const bytes = m[1].trim().split(/\s+/);
+    const v = parseInt(bytes[bytes.length - 1], 16) & 0x7F;
+    if (v >= 1 && v <= 127) return String(v);
+  }
   // Decimal: Cause value: 34 · Cause=34 · cause: 16 · Q.931 cause 34 ·
   // Release Cause: 41 · cause 34 · Cause [82] - ... · Cause: 16 (Normal Clearing)
-  let m = line.match(/release\s+cause\s*[:=]?\s*\[?(\d{1,3})\b/i);
+  m = line.match(/release\s+cause\s*[:=]?\s*\[?(\d{1,3})\b/i);
   if (m) return m[1];
   m = line.match(/cause\s*(?:value\s*)?[:=]?\s*\[?(?!0x)(\d{1,3})\b/i);
   if (m) return m[1];
@@ -694,34 +758,78 @@ function extractCause(line){
   return null;
 }
 
+/* Extrae el número origen/destino de una línea Q.931, en los formatos
+   conocidos: "Calling party number: 5550101", "callerNum=5550101"
+   (Dinstar), "Caller=5550101" (Synway), "caller:5550101" (resumen
+   Dinstar) y el IE en hex ASCII "IE_CALLING_PN 6c 0a 00 80 35 35..."
+   (Dinstar). Devuelve el número o ''. */
+function extractQ931Number(line, which){
+  const pats = which === 'calling'
+    ? [/calling\s+(?:party\s+)?number\s*[:=]\s*([+\d][\d\s-]*)/i,
+       /callerNum\s*=\s*([+\d][\d]*)/i,
+       /caller\s*=\s*([+\d][\d]*)/i,
+       /\bcaller\s*:\s*([+\d][\d]*)/i]
+    : [/called\s+(?:party\s+)?number\s*[:=]\s*([+\d][\d\s-]*)/i,
+       /calleeNum\s*=\s*([+\d][\d]*)/i,
+       /called\s*=\s*([+\d][\d]*)/i,
+       /\bcalled\s*:\s*([+\d][\d]*)/i];
+  for (const re of pats){
+    const m = line.match(re);
+    if (m) return m[1].trim().replace(/[\s-]+$/, '');
+  }
+  return decodeIeNumber(line, which === 'calling' ? 'CALLING' : 'CALLED');
+}
+
+/* Dinstar: IE_CALLING_PN 6c 0a 00 80 35 35 35 30 31 30 31 — los bytes
+   después de la cabecera del IE son los dígitos en ASCII hex
+   (0x35='5', 0x30='0'...). Se juntan solo los dígitos (y un + inicial). */
+function decodeIeNumber(line, which){
+  const m = line.match(new RegExp('IE_' + which + '_PN\\s+((?:[0-9A-Fa-f]{2}\\s*)+)', 'i'));
+  if (!m) return '';
+  const digits = m[1].trim().split(/\s+/).map(function(h){ return parseInt(h, 16); })
+    .filter(function(b){ return (b >= 0x30 && b <= 0x39) || b === 0x2B; })
+    .map(function(b){ return String.fromCharCode(b); }).join('');
+  return digits.length >= 4 ? digits : '';
+}
+
 /* Recibe las líneas originales (para mostrar) y las YA limpias. */
 function parseQ931FromLines(origLines, lines){
   const messages = [];
   let lastMsg = null, gap = 0;
   let calling = '', called = '', channel = '';
+  // Dinstar: CC_DISCONNECT_REQ trae cause=16; es la causa del DISCONNECT
+  // que viene después, no del mensaje anterior. Se guarda hasta que llegue.
+  let pendingCause = null;
   for (let li = 0; li < lines.length; li++){
     const line = lines[li].trim();
     const rawLine = origLines[li].trim();
     if (!line){ gap++; continue; }
     // Números y canal (ayudan a ubicar la llamada en el PRI; se conserva el primero hallado)
     if (!calling){
-      const cm = line.match(/calling\s+(?:party\s+)?number\s*[:=]\s*([+\d][\d\s-]*)/i);
-      if (cm) calling = cm[1].trim();
+      const n = extractQ931Number(line, 'calling');
+      if (n) calling = n;
     }
     if (!called){
-      const cm = line.match(/called\s+(?:party\s+)?number\s*[:=]\s*([+\d][\d\s-]*)/i);
-      if (cm) called = cm[1].trim();
+      const n = extractQ931Number(line, 'called');
+      if (n) called = n;
     }
     if (!channel){
       const cm = line.match(/(?:channel|timeslot|b-?channel)(?:\s+(?:id|identification|number))?\s*[:=]\s*([A-Za-z0-9\/\-]+)/i);
       if (cm) channel = cm[1].trim();
     }
+    // Dinstar: la línea Q931CallReport es un resumen, no un mensaje en el cable.
+    // Líneas SIP (en un log mixto forzado a Q.931): el "Session Progress" del
+    // 183 no es un PROGRESS Q.931.
+    const isSipLine = /^\s*(?:TX:|RX:)?\s*(?:SIP\/2\.0\b|(?:INVITE|ACK|BYE|CANCEL|OPTIONS|REGISTER|PRACK|SUBSCRIBE|NOTIFY|REFER|INFO|MESSAGE|UPDATE)\s+\S+\s+SIP\/2\.0)/i.test(line);
+    const qLine = normalizeMtType(line);
     let type = null;
-    for (const t of Q931_MESSAGES){
-      if (new RegExp('\\b' + t.replace(/ /g,'\\s+') + '\\b', 'i').test(line)){
-        // "Release Cause: 41" es una línea de causa, no un mensaje RELEASE
-        if (/^\s*release\s+cause\b/i.test(line)) continue;
-        type = t; break;
+    if (!/Q931CallReport/i.test(line) && !isSipLine){
+      for (const t of Q931_MESSAGES){
+        if (new RegExp('\\b' + t.replace(/ /g,'\\s+') + '\\b', 'i').test(qLine)){
+          // "Release Cause: 41" es una línea de causa, no un mensaje RELEASE
+          if (/^\s*release\s+cause\b/i.test(line)) continue;
+          type = t; break;
+        }
       }
     }
     if (type){
@@ -729,14 +837,23 @@ function parseQ931FromLines(origLines, lines){
       if (/\bTX\b|sent|\u2192|->|>>/.test(line)) dir = 'AtoB';
       else if (/\bRX\b|received|\u2190|<-|<</.test(line)) dir = 'BtoA';
       if (!dir) dir = Q931_DEFAULT_DIR[type] || 'BtoA';
-      lastMsg = {kind:'q931', type:type, dir:dir, cause:extractCause(line), raw:rawLine};
+      let cause = extractCause(line);
+      if (!cause && type === 'DISCONNECT' && pendingCause) cause = pendingCause;
+      pendingCause = null;
+      const crm = line.match(/\bcr\s*=\s*(0x[0-9A-Fa-f]+|\d+)/i);
+      lastMsg = {kind:'q931', type:type, dir:dir, cause:cause, callref: crm ? crm[1] : '', raw:rawLine};
       messages.push(lastMsg); gap = 0;
       continue;
     }
     // Línea de causa suelta: pertenece al último mensaje que aún no tiene causa
     if (/cause/i.test(line) && lastMsg && !lastMsg.cause && gap <= 3){
       const c = extractCause(line);
-      if (c) lastMsg.cause = c;
+      if (c && +c >= 1){
+        // Dinstar: las líneas CC_* (CC_DISCONNECT_REQ, ...) son señales internas
+        // del gateway: su causa es del próximo DISCONNECT, no del mensaje anterior.
+        if (/\bCC_[A-Z]/i.test(line)) pendingCause = c;
+        else lastMsg.cause = c;
+      }
     }
     gap++;
   }
@@ -750,6 +867,15 @@ function parseQ931(text){
 
 /* ---------------- Punto de entrada ---------------- */
 
+/* ¿El texto trae mensajes SIP? Se mira línea por línea (con prefijo
+   TX:/RX:/FS-* opcional y el "SIP" extra de Synway). Sirve para avisar
+   cuando un log trae las dos patas (SIP y Q.931). */
+function hasSipMessages(lines){
+  return lines.some(function(l){
+    return /^\s*(?:TX:|RX:|FS-RECV:|FS-SEND:)?\s*(?:SIP\s+)?(?:SIP\/2\.0\b|(?:INVITE|ACK|BYE|CANCEL|OPTIONS|REGISTER|PRACK|SUBSCRIBE|NOTIFY|REFER|INFO|MESSAGE|UPDATE)\s+\S+\s+SIP\/2\.0)/i.test(l);
+  });
+}
+
 function parseTrace(text, opts){
   opts = opts || {};
   const forced = opts.format || 'auto'; // 'auto' | 'SIP' | 'Q931'
@@ -761,12 +887,16 @@ function parseTrace(text, opts){
   // una vez da el mismo resultado que limpiarla varias veces.
   const origLines = text.split(/\r?\n/);
   const cleanLines = origLines.map(function(l){ return stripLogPrefix(l); });
+  // ¿El log trae las dos patas (SIP y Q.931)? Se avisa en la UI para que
+  // el técnico vea también la otra pata con el selector de formato.
+  const mixed = hasSipMessages(cleanLines) && parseQ931FromLines(origLines, cleanLines).messages.length > 0;
   // Formato forzado a Q.931: se lee solo el lado Q.931 del log (la parte
   // SIP se ignora). Sirve para los logs de gateway que traen las dos
   // patas de la misma llamada en un solo archivo.
   if (forced === 'Q931'){
     const parsed = parseQ931FromLines(origLines, cleanLines);
-    return parsed.messages.length ? parsed : {format:'unknown', messages:[], keyData:{}, forcedFormat:'Q931'};
+    parsed.mixed = mixed;
+    return parsed.messages.length ? parsed : {format:'unknown', messages:[], keyData:{}, forcedFormat:'Q931', mixed:mixed};
   }
   // Logs de FreeSWITCH: el SIP vive dentro de bloques recv/send de sofia;
   // las líneas de diagnóstico se extraen aparte y acompañan al resultado.
@@ -776,19 +906,25 @@ function parseTrace(text, opts){
     const parsed = parseSIPFromLines(fsResult.sipText.split(/\r?\n/), callId);
     parsed.freeswitch = true;
     parsed.diagnostics = diagnostics;
+    parsed.mixed = mixed;
     return parsed;
   }
   const fmt = forced === 'SIP' ? 'SIP' : detectFormatFromLines(cleanLines);
   if (fmt === 'SIP'){
     const parsed = parseSIPFromLines(cleanLines, callId);
-    if (forced === 'SIP' && !parsed.messages.length) return {format:'unknown', messages:[], keyData:{}, forcedFormat:'SIP'};
+    if (forced === 'SIP' && !parsed.messages.length) return {format:'unknown', messages:[], keyData:{}, forcedFormat:'SIP', mixed:mixed};
     if (diagnostics.length) parsed.diagnostics = diagnostics;
     if (fsResult.isFS) parsed.freeswitch = true;
+    parsed.mixed = mixed;
     return parsed;
   }
-  if (fmt === 'Q931') return parseQ931FromLines(origLines, cleanLines);
-  if (diagnostics.length) return {format:'diag', messages:[], diagnostics:diagnostics, freeswitch:true, keyData:{}};
-  return {format:'unknown', messages:[], keyData:{}, forcedFormat: forced === 'auto' ? undefined : forced};
+  if (fmt === 'Q931'){
+    const parsed = parseQ931FromLines(origLines, cleanLines);
+    parsed.mixed = mixed;
+    return parsed;
+  }
+  if (diagnostics.length) return {format:'diag', messages:[], diagnostics:diagnostics, freeswitch:true, keyData:{}, mixed:mixed};
+  return {format:'unknown', messages:[], keyData:{}, forcedFormat: forced === 'auto' ? undefined : forced, mixed:mixed};
 }
 
 /* ---------------- Explicación paso a paso ---------------- */
@@ -935,7 +1071,20 @@ function diagnose(parsed){
     if (byeOk){
       out.outcome = out.warnings.length ? 'warn' : 'ok';
       out.title = 'La llamada se completó normalmente';
-      out.detail = 'Hubo INVITE, contestación (200 OK), ACK y cierre con BYE + 200 OK. El flujo de señalización está completo.';
+      // El detalle solo afirma lo que la traza realmente trae: un fragmento
+      // (como el de Synway) puede no traer el INVITE.
+      const partes = [];
+      if (hasInvite) partes.push('INVITE');
+      const answered200 = responses.some(function(m){
+        if (m.code !== '200') return false;
+        if (m.cseq && !/INVITE\s*$/i.test(m.cseq)) return false;
+        if (byeIdx >= 0 && msgs.indexOf(m) > byeIdx) return false;
+        return true;
+      });
+      if (answered200) partes.push('contestación (200 OK)');
+      if (ackAfterOk) partes.push('ACK');
+      partes.push('cierre con BYE + 200 OK');
+      out.detail = 'Hubo ' + partes.slice(0, -1).join(', ') + (partes.length > 1 ? ' y ' : '') + partes[partes.length - 1] + '. El flujo de señalización está completo.';
       if (authOvercome) out.detail += ' Antes hubo un reto de autenticación (401/407) y el reintento con credenciales funcionó.';
     } else if (lastFinal){
       const isCancel487 = lastFinal.code === '487';
@@ -979,6 +1128,23 @@ function diagnose(parsed){
       out.outcome = 'warn';
       out.title = 'Traza SIP parcial';
       out.detail = 'Se reconoce como SIP, pero no se ve un INVITE completo. Puede ser un fragmento (por ejemplo, solo un REGISTER o un OPTIONS).';
+    }
+    // REGISTER rechazado con 405: el equipo intentó registrarse en un
+    // gateway que no acepta REGISTER. Se anota como hallazgo aunque los
+    // REGISTER compartan la llamada con el INVITE (en Synway no traen
+    // Call-ID y caen en la misma llamada). Si el título ya dice que el
+    // registro falló con 405, no se repite.
+    const register405 = responses.some(function(resp){
+      if (resp.code !== '405') return false;
+      const ri = msgs.indexOf(resp);
+      return msgs.some(function(r, i){
+        if (r.method !== 'REGISTER' || i >= ri) return false;
+        if (r.cseq && resp.cseq) return resp.cseq === r.cseq;
+        return true; // sin CSeq: el 405 que viene después del REGISTER es su respuesta
+      });
+    });
+    if (register405 && !(isRegister && lastFinal && lastFinal.code === '405')){
+      out.warnings.push('Hay intentos de REGISTER rechazados con 405: este equipo no acepta registros.');
     }
     // Pistas del log de FreeSWITCH (si la traza vino de un log sofia):
     // un 5xx acompañado de una pista de TLS en el log apunta al TLS,
@@ -1050,7 +1216,7 @@ function diagnose(parsed){
   }
   out.outcome = 'warn';
   out.title = 'Formato no reconocido';
-  out.detail = 'No reconozco este formato. TraceNo\'j v1.6 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…) y logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro).';
+  out.detail = 'No reconozco este formato. TraceNo\'j v1.8 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…), logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro) y logs de gateways Dinstar (mpe_q931) y Synway.';
   return out;
 }
 
@@ -1292,6 +1458,7 @@ if (typeof module !== 'undefined' && module.exports){
       return;
     }
     var avisoMulti = document.getElementById('avisoMulti');
+    var avisoTxt = '';
     if (parsed.calls && parsed.calls.length > 1){
       llamadaSelect.innerHTML = '';
       parsed.calls.forEach(function(c, i){
@@ -1303,14 +1470,22 @@ if (typeof module !== 'undefined' && module.exports){
       llamadaSelect.value = parsed.keyData.callId;
       selectorLlamada.style.display = 'block';
       var extraOpt = parsed.optionsFiltered ? ' Además se apartaron ' + parsed.optionsFiltered + ' mensajes OPTIONS.' : '';
-      avisoMulti.innerHTML = '<b>Esta captura trae ' + parsed.calls.length + ' llamadas.</b> Elige una en el menú de arriba para ver su flujo y su diagnóstico.' + extraOpt;
-      avisoMulti.style.display = 'block';
+      avisoTxt = '<b>Esta captura trae ' + parsed.calls.length + ' llamadas.</b> Elige una en el menú de arriba para ver su flujo y su diagnóstico.' + extraOpt;
     } else if (parsed.optionsFiltered){
       selectorLlamada.style.display = 'none';
-      avisoMulti.innerHTML = '<b>Nota:</b> se apartaron ' + parsed.optionsFiltered + ' mensajes OPTIONS (keepalives del SBC) para no ensuciar el flujo de la llamada.';
-      avisoMulti.style.display = 'block';
+      avisoTxt = '<b>Nota:</b> se apartaron ' + parsed.optionsFiltered + ' mensajes OPTIONS (keepalives del SBC) para no ensuciar el flujo de la llamada.';
     } else {
       selectorLlamada.style.display = 'none';
+    }
+    // Log mixto (SIP + Q.931): se avisa para que el técnico vea también
+    // la otra pata con el selector de formato.
+    if (parsed.mixed){
+      avisoTxt += (avisoTxt ? '<br>' : '') + '<b>Este log trae SIP y Q.931:</b> cambia el formato para ver la otra pata.';
+    }
+    if (avisoTxt){
+      avisoMulti.innerHTML = avisoTxt;
+      avisoMulti.style.display = 'block';
+    } else {
       avisoMulti.style.display = 'none';
     }
     document.getElementById('ladder').innerHTML = renderLadder(parsed);
@@ -1363,7 +1538,7 @@ if (typeof module !== 'undefined' && module.exports){
       var extra = '';
       if (ultimoFormato === 'Q931') extra = ' Forzaste el formato Q.931 y no se encontró ningún mensaje Q.931 en el texto. Prueba con Automático o revisa que el texto traiga SETUP, DISCONNECT o una causa.';
       if (ultimoFormato === 'SIP') extra = ' Forzaste el formato SIP y no se encontró ningún mensaje SIP en el texto. Prueba con Automático.';
-      aviso.innerHTML = '<b>No reconozco este formato.</b> TraceNo\'j v1.6 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…) y logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro).' + extra + ' Si tu traza es de otro formato, dime cuál es y la agrego en la siguiente versión.';
+      aviso.innerHTML = '<b>No reconozco este formato.</b> TraceNo\'j v1.8 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…), logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro) y logs de gateways Dinstar (mpe_q931) y Synway.' + extra + ' Si tu traza es de otro formato, dime cuál es y la agrego en la siguiente versión.';
       aviso.style.display = 'block';
       salida.style.display = 'none';
       return;
