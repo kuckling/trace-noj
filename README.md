@@ -10,7 +10,7 @@ Laboratorio e intérprete de trazas VoIP (SIP y Q.931) en un solo archivo HTML, 
 
 ## Qué es
 
-Una aplicación para técnicos de telcos que no saben interpretar una traza. Pegas la traza y te muestra:
+Una aplicación para técnicos de telcos que se les dificulta interpretar una traza. Pegas la traza y te muestra:
 
 1. 🪜 **El flujo de la llamada** en un diagrama de escalera (llamante ↔ PBX/gateway, o terminal ↔ red).
 2. 📝 **La explicación paso a paso** de cada mensaje, en español claro.
