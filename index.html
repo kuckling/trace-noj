@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TraceNo'j — La traza, explicada</title>
+<style>
+  :root{
+    --bg:#0a1628; --panel:#10233f; --panel2:#0d1d33; --line:#1e3a5f;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --accent2:#2563eb;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.5}
+  .wrap{max-width:920px;margin:0 auto;padding:16px}
+  header{background:linear-gradient(135deg,#0b2a52,#0a1628);border-bottom:2px solid var(--accent);padding:22px 16px 18px;text-align:center}
+  header h1{margin:0;font-size:1.9em;letter-spacing:.5px}
+  header h1 span{color:var(--accent)}
+  header p{margin:6px 0 0;color:var(--muted)}
+  .tabs{display:flex;gap:8px;margin:18px 0 0;flex-wrap:wrap}
+  .tabs button{flex:1;min-width:110px;padding:11px 8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font-size:1em;cursor:pointer}
+  .tabs button.active{background:var(--accent2);border-color:var(--accent2);font-weight:700}
+  .tabpane{display:none}
+  .tabpane.active{display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+  .card h2{margin:0 0 8px;font-size:1.25em}
+  .card h3{margin:14px 0 6px;font-size:1.05em;color:var(--accent)}
+  .muted{color:var(--muted)}
+  .small{font-size:.9em}
+  textarea{width:100%;min-height:220px;background:#071223;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font-family:ui-monospace,Consolas,monospace;font-size:.9em;resize:vertical}
+  select,input[type=text]{background:#071223;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;font-size:1em}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+  button.btn{background:var(--accent2);color:#fff;border:none;border-radius:9px;padding:11px 16px;font-size:1em;cursor:pointer}
+  button.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  button.btn:hover{filter:brightness(1.15)}
+  pre.trace{background:#071223;border:1px solid var(--line);border-radius:10px;padding:12px;overflow-x:auto;font-size:.85em;white-space:pre-wrap;word-break:break-word}
+  /* Diagrama de escalera */
+  .ladder{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2)}
+  .ladder-cols{display:flex;justify-content:space-between;font-weight:700;color:var(--accent);padding:0 4px 8px}
+  .lr{display:flex;align-items:center;gap:6px;margin:10px 0}
+  .lr-side{font-size:.8em;color:var(--muted);white-space:nowrap}
+  .lr-line{flex:1;border-top:2px solid var(--accent);position:relative;text-align:center;min-width:40px}
+  .lr-line i{position:relative;top:-11px;background:var(--panel2);padding:0 6px;font-style:normal;font-size:.9em}
+  .lr-line.to-right::after{content:'';position:absolute;right:-2px;top:-6px;border:5px solid transparent;border-left-color:var(--accent)}
+  .lr-line.to-left::before{content:'';position:absolute;left:-2px;top:-6px;border:5px solid transparent;border-right-color:var(--accent)}
+  .lr-line.bad{border-top-color:var(--bad)}
+  .lr-line.bad.to-right::after{border-left-color:var(--bad)}
+  .lr-line.bad.to-left::before{border-right-color:var(--bad)}
+  .lr-line.warn{border-top-color:var(--warn)}
+  .lr-line.warn.to-right::after{border-left-color:var(--warn)}
+  .lr-line.warn.to-left::before{border-right-color:var(--warn)}
+  /* Diagnóstico */
+  .diag{border-radius:10px;padding:14px;margin:12px 0;border:2px solid}
+  .diag.ok{border-color:var(--ok);background:rgba(34,197,94,.08)}
+  .diag.fail{border-color:var(--bad);background:rgba(239,68,68,.08)}
+  .diag.warn{border-color:var(--warn);background:rgba(245,158,11,.08)}
+  .diag h3{margin:0 0 6px}
+  .diag ul{margin:6px 0 0;padding-left:20px}
+  .kv{display:grid;grid-template-columns:130px 1fr;gap:4px 10px;font-size:.95em}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0;word-break:break-word}
+  ol.pasos{padding-left:22px}
+  ol.pasos li{margin:8px 0}
+  .tag{display:inline-block;background:var(--accent2);color:#fff;border-radius:6px;padding:1px 8px;font-size:.85em;font-family:ui-monospace,Consolas,monospace}
+  table{width:100%;border-collapse:collapse;font-size:.92em}
+  th,td{border:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--accent)}
+  td code{color:var(--accent);font-weight:700}
+  .respuesta{display:none;margin-top:10px;border-left:3px solid var(--accent);padding:10px 12px;background:var(--panel2);border-radius:0 8px 8px 0}
+  .respuesta.abierta{display:block}
+  footer{text-align:center;color:var(--muted);padding:22px 12px 30px;font-size:.9em;border-top:1px solid var(--line);margin-top:20px}
+  .aviso{background:rgba(245,158,11,.1);border:1px solid var(--warn);border-radius:10px;padding:12px;margin:12px 0}
+  .media-box{border:1px solid var(--line);border-radius:10px;padding:12px;margin:12px 0;background:var(--panel2)}
+  .media-box h4{margin:0 0 8px;color:var(--accent)}
+  .lr-line.retrans{border-top-style:dashed;opacity:.8}
+  @media (max-width:560px){
+    header h1{font-size:1.5em}
+    .kv{grid-template-columns:1fr}
+    .kv dt{margin-top:6px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trace<span>No'j</span> — La traza, explicada</h1>
+  <p>Laboratorio e intérprete de trazas VoIP (SIP y Q.931)</p>
+</header>
+<div class="wrap">
+  <nav class="tabs">
+    <button class="active" data-tab="interprete">🔍 Intérprete</button>
+    <button data-tab="lab">🧪 Laboratorio</button>
+    <button data-tab="causas">📖 Causas</button>
+  </nav>
+
+  <!-- ============ INTÉRPRETE ============ -->
+  <section class="tabpane active" id="tab-interprete">
+    <div class="card">
+      <h2>Pega tu traza</h2>
+      <p class="muted small">Funciona con trazas SIP (texto del INVITE, 180, 200 OK…) y con trazas Q.931 de un gateway PRI (SETUP, ALERTING, DISCONNECT con causa…). También entiende logs de FreeSWITCH (sofia): extrae el SIP de los bloques recv/send, y si el fragmento solo trae líneas de diagnóstico (por ejemplo, TLS handshake failed), te dice lo que significan. La app detecta sola de cuál se trata. También acepta trazas reales con prefijos de log: timestamps, IP:puerto, niveles (INFO/DEBUG) o etiquetas como [SIP] al inicio de línea. Todo se procesa en tu navegador: nada sale de tu equipo.</p>
+      <textarea id="traceInput" placeholder="Pega aquí la traza SIP o Q.931…&#10;&#10;Ejemplo SIP:&#10;INVITE sip:5550202@pbx.empresa.test SIP/2.0&#10;From: &lt;sip:5550101@pbx.empresa.test&gt;&#10;…&#10;&#10;Ejemplo Q.931:&#10;TX: SETUP&#10;RX: CALL PROCEEDING&#10;RX: DISCONNECT&#10;  Cause value: 34"></textarea>
+      <div class="row">
+        <button class="btn" id="btnInterpretar">▶ Interpretar traza</button>
+        <button class="btn ghost" id="btnLimpiar">Limpiar</button>
+        <label class="small muted" for="ejemploSelect">Cargar ejemplo:</label>
+        <select id="ejemploSelect">
+          <option value="">— elegir caso —</option>
+        </select>
+      </div>
+      <p class="muted small">Consejo: en la traza real, borra o cambia los números y las IP antes de pegarla si no quieres compartir datos de tus clientes. La app no los necesita para explicar el flujo.</p>
+    </div>
+    <div id="salida" style="display:none">
+      <div id="avisoMulti" class="aviso" style="display:none"></div>
+      <div class="card">
+        <h2>1 · Flujo de la llamada</h2>
+        <div id="ladder"></div>
+      </div>
+      <div class="card">
+        <h2>2 · Paso a paso</h2>
+        <ol class="pasos" id="pasos"></ol>
+        <h3>Datos clave extraídos</h3>
+        <dl class="kv" id="datosClave"></dl>
+      </div>
+      <div class="card">
+        <h2>3 · Diagnóstico</h2>
+        <div id="diagnostico"></div>
+      </div>
+    </div>
+    <div id="avisoFormato" class="aviso" style="display:none"></div>
+  </section>
+
+  <!-- ============ LABORATORIO ============ -->
+  <section class="tabpane" id="tab-lab">
+    <div class="card">
+      <h2>Laboratorio: 7 casos para practicar</h2>
+      <p class="muted">Trazas ficticias con números inventados. Lee la traza, responde la pregunta en tu cabeza y luego pulsa <b>Ver respuesta</b>. También puedes cargar cada caso en el Intérprete con el desplegable de ejemplos. Los casos 5 y 6 vienen con prefijos de log reales (timestamps, [SIP], syslog) para practicar como se ven los logs de un gateway. El caso 7 es un log de FreeSWITCH con bloques recv/send y una línea de error TLS.</p>
+    </div>
+    <div id="casosLab"></div>
+  </section>
+
+  <!-- ============ CAUSAS ============ -->
+  <section class="tabpane" id="tab-causas">
+    <div class="card">
+      <h2>Causas Q.931 (PRI / ISDN)</h2>
+      <p class="muted small">La causa es el motivo que trae el DISCONNECT. Es lo primero que se lee en una traza Q.931.</p>
+      <table>
+        <tr><th>Causa</th><th>Qué significa</th><th>Qué revisar</th><th>Posible origen</th></tr>
+        <tr><td><code>1</code></td><td>Número no asignado</td><td>El número marcado no existe: verifica los dígitos.</td><td>Lo más probable es que el número no esté provisionado o que el plan de marcado no lo complete; el origen suele estar en la PBX o en la configuración del gateway.</td></tr>
+        <tr><td><code>16</code></td><td>Liberación normal</td><td>Alguien colgó: no es una falla.</td><td>No es una falla: alguien colgó de forma normal.</td></tr>
+        <tr><td><code>17</code></td><td>Usuario ocupado</td><td>El destino está en otra llamada.</td><td>Lo más probable es que el destino esté realmente ocupado en otra llamada; el origen está en el extremo llamado.</td></tr>
+        <tr><td><code>18</code></td><td>Sin respuesta del usuario</td><td>Sonó y nadie contestó: el problema no es la red.</td><td>Lo más probable es que el usuario no estuviera disponible para contestar; el origen está en el extremo llamado, no en la red.</td></tr>
+        <tr><td><code>19</code></td><td>Sin respuesta (alertado)</td><td>Sonó pero no contestaron en el tiempo de alerta.</td><td>Lo más probable es que el usuario no contestara en el tiempo de alerta; el origen está en el extremo llamado.</td></tr>
+        <tr><td><code>21</code></td><td>Llamada rechazada</td><td>El usuario rechazó la llamada.</td><td>Lo más probable es que el usuario rechazara la llamada manualmente; el origen está en el extremo llamado.</td></tr>
+        <tr><td><code>22</code></td><td>Número cambiado</td><td>El número cambió: actualiza el contacto.</td><td>Lo más probable es que el número haya cambiado y el contacto esté desactualizado; el origen está en el directorio o en la PBX.</td></tr>
+        <tr><td><code>28</code></td><td>Formato de número inválido</td><td>Número mal formado: revisa el plan de marcado.</td><td>Lo más probable es un error de marcado o del plan de marcado; el origen suele estar en la PBX o en el equipo que envía los dígitos.</td></tr>
+        <tr><td><code>31</code></td><td>Normal, no especificado</td><td>Fin normal sin más detalle.</td><td>No es una falla: liberación normal sin más detalle.</td></tr>
+        <tr><td><code>34</code></td><td>Sin circuito disponible</td><td>Troncales ocupadas o ruta caída. Revisa la ocupación del PRI y la capacidad. Equivalente SIP: 503.</td><td>Lo más probable es que todas las troncales PRI estén ocupadas, que la ruta esté caída o que el gateway no tenga canales libres; el origen suele estar en la troncal PRI o en el gateway.</td></tr>
+        <tr><td><code>38</code></td><td>Red fuera de servicio</td><td>Falla en la red del operador destino: escala al operador.</td><td>Lo más probable es una falla en la red del operador destino; el origen está fuera de tu red: escala al operador.</td></tr>
+        <tr><td><code>41</code></td><td>Falla temporal</td><td>Transitorio: reintenta; si se repite, revisa el enlace.</td><td>Lo más probable es una falla transitoria en la red o en el enlace; el origen suele estar en el enlace o en la red del operador.</td></tr>
+        <tr><td><code>42</code></td><td>Congestión del equipo</td><td>Equipo de conmutación saturado: revisa carga y capacidad.</td><td>Lo más probable es que el equipo de conmutación esté saturado; el origen está en la central o en el gateway sobrecargado.</td></tr>
+        <tr><td><code>44</code></td><td>Circuito solicitado no disponible</td><td>El circuito pedido no está disponible: revisa su estado.</td><td>Lo más probable es que el circuito pedido esté ocupado o fuera de servicio; el origen está en el circuito o en la troncal.</td></tr>
+        <tr><td><code>47</code></td><td>Recurso no disponible</td><td>Falta un recurso en el gateway o la central.</td><td>Lo más probable es que falte un recurso en el gateway o en la central (canal, DSP o licencia); el origen está en el gateway o en la central.</td></tr>
+        <tr><td><code>58</code></td><td>Capacidad portadora no disponible</td><td>La red no puede dar el tipo de portadora pedida: revisa la configuración del gateway.</td><td>Lo más probable es una portadora mal configurada en el gateway; el origen está en la configuración del gateway.</td></tr>
+        <tr><td><code>88</code></td><td>Destino incompatible</td><td>El destino no soporta ese tipo de llamada.</td><td>Lo más probable es que el destino no soporte ese tipo de llamada (voz, datos, fax); el origen está en el equipo destino o en la configuración del gateway.</td></tr>
+        <tr><td><code>96</code></td><td>Falta un elemento obligatorio</td><td>Error de protocolo: revisa versión y configuración del equipo.</td><td>Lo más probable es un error de protocolo entre equipos de distintos fabricantes o versiones; el origen está en la compatibilidad de protocolo.</td></tr>
+        <tr><td><code>97</code></td><td>Tipo de mensaje no existente</td><td>Incompatibilidad de protocolo entre equipos: revisa versiones.</td><td>Lo más probable es incompatibilidad de protocolo entre equipos; el origen está en las versiones de software de ambos lados.</td></tr>
+        <tr><td><code>99</code></td><td>Elemento de información no existente</td><td>Incompatibilidad de protocolo: revisa versiones y configuración.</td><td>Lo más probable es incompatibilidad de protocolo entre equipos; el origen está en las versiones de software de ambos lados.</td></tr>
+        <tr><td><code>127</code></td><td>Interfuncionamiento no especificado</td><td>Problema entre redes o equipos distintos: revisa el enlace.</td><td>Lo más probable es un problema de interfuncionamiento entre redes o equipos distintos; el origen está en el enlace entre ambos.</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Respuestas SIP</h2>
+      <p class="muted small">El código de tres dígitos de la respuesta dice cómo terminó cada intento. 1xx = avanza, 2xx = éxito, 4xx = falló el cliente, 5xx = falló el servidor, 6xx = falló en todo lado.</p>
+      <table>
+        <tr><th>Código</th><th>Qué significa</th><th>Qué revisar</th><th>Posible origen</th></tr>
+        <tr><td><code>100</code></td><td>Trying: el servidor recibió el INVITE y lo procesa.</td><td>Si solo ves 100, el destino no respondió a tiempo.</td><td>No es una falla: el servidor está procesando el INVITE.</td></tr>
+        <tr><td><code>180</code></td><td>Ringing: el teléfono destino está sonando.</td><td>Si suena y nunca contestan, el problema no es la red.</td><td>No es una falla: el teléfono destino está sonando.</td></tr>
+        <tr><td><code>183</code></td><td>Session Progress: avanza y puede venir audio temprano.</td><td>Revisa el SDP: ahí se negocia el audio temprano.</td><td>No es una falla: la llamada avanza con audio temprano.</td></tr>
+        <tr><td><code>200</code></td><td>OK: la petición tuvo éxito (contestaron, o el BYE cerró bien).</td><td>Tras el 200 OK al INVITE debe venir un ACK.</td><td>No es una falla: la petición tuvo éxito.</td></tr>
+        <tr><td><code>400</code></td><td>Bad Request: petición mal formada.</td><td>Cabeceras incompletas, URI mal formada o SDP roto.</td><td>Lo más probable es que el equipo llamante envíe el mensaje mal formado; el origen suele estar en el terminal o en la PBX que genera el INVITE.</td></tr>
+        <tr><td><code>401</code></td><td>Unauthorized: falta autenticación.</td><td>Usuario y contraseña SIP; que el equipo esté registrado.</td><td>Lo más probable es que falten credenciales o que el equipo no esté registrado; el origen suele estar en la configuración del terminal o de la PBX.</td></tr>
+        <tr><td><code>407</code></td><td>Proxy Authentication Required: el proxy/SBC pide autenticación.</td><td>Credenciales de troncal/usuario en el gateway o PBX hacia el SBC.</td><td>Lo más probable es que el SBC/proxy pida credenciales para cursar la llamada; el origen suele estar en la configuración de autenticación del gateway o PBX.</td></tr>
+        <tr><td><code>403</code></td><td>Forbidden: sin permiso para llamar a ese destino.</td><td>Plan de marcado y permisos del usuario en la PBX.</td><td>Lo más probable es que el usuario no tenga permiso para ese destino; el origen suele estar en el plan de marcado o en los permisos de la PBX.</td></tr>
+        <tr><td><code>404</code></td><td>Not Found: el número no existe en ese servidor.</td><td>Dígitos de más o de menos, prefijo que falta.</td><td>Lo más probable es que el número no esté provisionado, que falte un prefijo o que el plan de marcado esté mal configurado; el origen suele estar en la PBX o en el gateway.</td></tr>
+        <tr><td><code>405</code></td><td>Method Not Allowed: el servidor no acepta ese método.</td><td>Compatibilidad del equipo o la PBX.</td><td>Lo más probable es que el equipo o la PBX no soporte ese método; el origen está en la compatibilidad del equipo.</td></tr>
+        <tr><td><code>408</code></td><td>Request Timeout: nadie respondió a tiempo.</td><td>Destino caído o firewall perdiendo paquetes.</td><td>Lo más probable es que el destino esté caído o que un firewall esté perdiendo paquetes; el origen suele estar en la red o en el equipo destino.</td></tr>
+        <tr><td><code>480</code></td><td>Temporarily Unavailable: el destino no puede atender ahora.</td><td>Estado del usuario: sin registro o fuera de cobertura.</td><td>Lo más probable es que el usuario esté sin registro o fuera de cobertura; el origen está en el estado del terminal destino.</td></tr>
+        <tr><td><code>484</code></td><td>Address Incomplete: faltan dígitos.</td><td>El usuario marcó incompleto.</td><td>Lo más probable es que el usuario marcara incompleto; el origen está en el marcado o en el plan de marcado.</td></tr>
+        <tr><td><code>486</code></td><td>Busy Here: ocupado.</td><td>No es falla de red: el usuario está en otra llamada.</td><td>Lo más probable es que el destino esté realmente ocupado o que el terminal quedara descolgado; el origen está en el extremo llamado.</td></tr>
+        <tr><td><code>487</code></td><td>Request Terminated: se canceló antes de contestar.</td><td>Alguien colgó en medio del timbrado.</td><td>No es una falla: alguien colgó antes de que contestaran.</td></tr>
+        <tr><td><code>488</code></td><td>Not Acceptable Here: códecs o medio no aceptados.</td><td>No hay códec común: activa uno compatible en ambos lados.</td><td>Lo más probable es que no haya un códec común o que falte transcodificación; el origen suele estar en la configuración de códecs del gateway o de la PBX.</td></tr>
+        <tr><td><code>500</code></td><td>Server Internal Error: el servidor falló.</td><td>Registros del servidor o PBX.</td><td>Lo más probable es un fallo del servidor o de la PBX; el origen está en el servidor que procesó la llamada.</td></tr>
+        <tr><td><code>502</code></td><td>Bad Gateway: respuesta inválida del otro lado.</td><td>Gateway y su enlace con la red destino.</td><td>Lo más probable es que el gateway reciba una respuesta inválida del otro lado; el origen está en el gateway o en su enlace.</td></tr>
+        <tr><td><code>503</code></td><td>Service Unavailable: sin servicio ahora mismo.</td><td>Gateway caído, saturado o sin troncales. Equivalente Q.931: causa 34.</td><td>Lo más probable es que el gateway esté caído, saturado o sin troncales libres; el origen suele estar en la troncal o en el gateway.</td></tr>
+        <tr><td><code>504</code></td><td>Server Time-out: un servidor en el camino no respondió.</td><td>Enlace hacia el siguiente salto (proxy o gateway).</td><td>Lo más probable es que un servidor en el camino no responda; el origen está en el enlace hacia el siguiente salto.</td></tr>
+        <tr><td><code>600</code></td><td>Busy Everywhere: ocupado en todas partes.</td><td>Como el 486, en toda la red.</td><td>Lo más probable es que el destino esté ocupado en toda la red; el origen está en el extremo llamado o en sus desvíos.</td></tr>
+        <tr><td><code>603</code></td><td>Decline: el usuario rechazó la llamada.</td><td>No es falla de red: rechazo manual.</td><td>Lo más probable es que el usuario rechazara la llamada manualmente; el origen está en el extremo llamado.</td></tr>
+        <tr><td><code>604</code></td><td>Does Not Exist Anywhere: el número no existe en ningún lado.</td><td>Verifica el marcado completo.</td><td>Lo más probable es que el número no exista en ninguna red; el origen está en el marcado.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    TraceNo'j — Hecho por Marlon Estuardo Alvarado Kuckling · CC BY-NC-SA 4.0<br>
+    <span class="small">Las trazas del laboratorio son ficticias, con números inventados. La app trabaja 100% en tu navegador: ninguna traza sale de tu equipo.</span>
+  </footer>
+</div>
+<script>
+/* ================= TraceNo'j — lógica pura (sin DOM) ================= */
+
+const SIP_METHODS = ['INVITE','ACK','BYE','CANCEL','REGISTER','OPTIONS','PRACK','UPDATE','SUBSCRIBE','NOTIFY','MESSAGE','REFER','INFO'];
+
+const SIP_METHOD_INFO = {
+  INVITE: 'El llamante pide iniciar una llamada.',
+  ACK: 'Confirmación del llamante: recibió el 200 OK y la llamada queda establecida.',
+  BYE: 'Una de las partes cuelga y pide terminar la llamada.',
+  CANCEL: 'El llamante cancela la llamada antes de que contesten.',
+  REGISTER: 'El equipo se registra en el servidor SIP para poder recibir llamadas.',
+  OPTIONS: 'Consulta de capacidades: pregunta qué métodos y códecs soporta el otro lado.',
+  PRACK: 'Confirmación de una respuesta provisional (1xx) que necesita acuse.',
+  UPDATE: 'Actualiza parámetros de la sesión sin cambiar el diálogo (por ejemplo, el SDP).',
+  SUBSCRIBE: 'Pide suscribirse a un estado (presencia, buzón, etc.).',
+  NOTIFY: 'Aviso de un cambio de estado al suscrito.',
+  MESSAGE: 'Mensaje instantáneo SIP (texto corto).',
+  REFER: 'Pide transferir la llamada a otro destino.',
+  INFO: 'Información adicional durante la llamada (por ejemplo, tonos DTMF).'
+};
+
+const SIP_RESPONSES = {
+  '100': {titulo:'Trying (Intentando)', significado:'El servidor recibió el INVITE y lo está procesando. No es un resultado, solo "ya lo tengo".', revisar:'Si solo ves 100 y nada más, el servidor no respondió a tiempo: revisa que el destino esté arriba y que ningún firewall esté bloqueando el retorno.', origen:'No es una falla: el servidor está procesando el INVITE.'},
+  '180': {titulo:'Ringing (Sonando)', significado:'El teléfono destino está sonando. La llamada llegó hasta el equipo del usuario.', revisar:'Si suena y nunca contestan, el problema no es la red: es el usuario o el equipo destino.', origen:'No es una falla: el teléfono destino está sonando.'},
+  '183': {titulo:'Session Progress (Progreso de sesión)', significado:'La llamada avanza y ya puede venir audio temprano (por ejemplo, el tono de llamada generado por la red). Viene con SDP.', revisar:'Revisa el SDP de este mensaje: ahí se negocia el audio temprano.', origen:'No es una falla: la llamada avanza con audio temprano.'},
+  '200': {titulo:'OK', significado:'La petición tuvo éxito. Para un INVITE: el otro lado contestó. Para un BYE: la llamada se cerró bien.', revisar:'Tras el 200 OK al INVITE debe venir un ACK. Si no viene, la llamada queda a medias.', origen:'No es una falla: la petición tuvo éxito.'},
+  '400': {titulo:'Bad Request (Petición mal formada)', significado:'El mensaje SIP trae un error de sintaxis o le falta algo obligatorio.', revisar:'Revisa el INVITE: cabeceras incompletas, URI mal formada o SDP roto.', origen:'Lo más probable es que el equipo llamante envíe el mensaje mal formado; el origen suele estar en el terminal o en la PBX que genera el INVITE.'},
+  '401': {titulo:'Unauthorized (No autorizado)', significado:'El servidor pide autenticación: faltan credenciales o están mal.', revisar:'Verifica usuario y contraseña SIP, y que el equipo esté registrado.', origen:'Lo más probable es que falten credenciales o que el equipo no esté registrado; el origen suele estar en la configuración del terminal o de la PBX.'},
+  '407': {titulo:'Proxy Authentication Required (Autenticación de proxy requerida)', significado:'El proxy o SBC pide autenticación antes de enrutar la llamada.', revisar:'Verifica usuario y contraseña de la troncal/cuenta SIP hacia el SBC o proxy.', origen:'Lo más probable es que el proxy o SBC exija credenciales para cursar la llamada; el origen suele estar en la configuración del gateway o de la PBX.'},
+  '403': {titulo:'Forbidden (Prohibido)', significado:'El servidor entendió la petición pero la rechaza: el usuario no tiene permiso para llamar a ese destino.', revisar:'Revisa el plan de marcado y los permisos del usuario en la PBX.', origen:'Lo más probable es que el usuario no tenga permiso para ese destino; el origen suele estar en el plan de marcado o en los permisos de la PBX.'},
+  '404': {titulo:'Not Found (No encontrado)', significado:'El número marcado no existe en ese servidor.', revisar:'Verifica el número: dígitos de más o de menos, prefijo que falta, o el usuario no está dado de alta.', origen:'Lo más probable es que el número no esté provisionado, que falte un prefijo o que el plan de marcado esté mal configurado; el origen suele estar en la PBX o en el gateway.'},
+  '405': {titulo:'Method Not Allowed (Método no permitido)', significado:'El servidor no acepta ese método SIP.', revisar:'El equipo o la PBX no soporta el método enviado; revisa la configuración.', origen:'Lo más probable es que el equipo o la PBX no soporte ese método; el origen está en la compatibilidad del equipo.'},
+  '408': {titulo:'Request Timeout (Tiempo agotado)', significado:'Nadie respondió a tiempo a la petición.', revisar:'El destino no contesta o hay un firewall perdiendo paquetes: revisa conectividad y que el equipo esté encendido y registrado.', origen:'Lo más probable es que el destino esté caído o que un firewall esté perdiendo paquetes; el origen suele estar en la red o en el equipo destino.'},
+  '480': {titulo:'Temporarily Unavailable (No disponible temporalmente)', significado:'El destino existe pero ahora mismo no puede atender la llamada.', revisar:'El usuario puede estar sin registro o fuera de cobertura; revisa su estado.', origen:'Lo más probable es que el usuario esté sin registro o fuera de cobertura; el origen está en el estado del terminal destino.'},
+  '484': {titulo:'Address Incomplete (Dirección incompleta)', significado:'Faltan dígitos en el número marcado.', revisar:'El usuario marcó incompleto: revisa el plan de marcado.', origen:'Lo más probable es que el usuario marcara incompleto; el origen está en el marcado o en el plan de marcado.'},
+  '486': {titulo:'Busy Here (Ocupado)', significado:'El destino está en otra llamada o rechazó por ocupado.', revisar:'No es una falla de red: el usuario está ocupado. Si siempre da ocupado, revisa desvíos y el estado del equipo.', origen:'Lo más probable es que el destino esté realmente ocupado o que el terminal quedara descolgado; el origen está en el extremo llamado.'},
+  '487': {titulo:'Request Terminated (Petición terminada)', significado:'La llamada se canceló antes de contestar (el llamante colgó o llegó un CANCEL).', revisar:'No es una falla: alguien colgó en medio del timbrado.', origen:'No es una falla: alguien colgó antes de que contestaran.'},
+  '488': {titulo:'Not Acceptable Here (No aceptable aquí)', significado:'El otro lado rechazó la llamada porque no acepta los códecs o el medio ofrecido.', revisar:'Compara los códecs ofrecidos en el INVITE con los del 200 OK o del rechazo: no hay códec común. Activa un códec compatible en ambos lados.', origen:'Lo más probable es que no haya un códec común o que falte transcodificación; el origen suele estar en la configuración de códecs del gateway o de la PBX.'},
+  '500': {titulo:'Server Internal Error (Error interno del servidor)', significado:'El servidor falló procesando la llamada.', revisar:'Revisa los registros del servidor o PBX: puede ser un fallo temporal o de configuración.', origen:'Lo más probable es un fallo del servidor o de la PBX; el origen está en el servidor que procesó la llamada.'},
+  '502': {titulo:'Bad Gateway (Puerta de enlace mala)', significado:'El gateway recibió una respuesta inválida del otro lado.', revisar:'Revisa el gateway y su enlace con la red destino.', origen:'Lo más probable es que el gateway reciba una respuesta inválida del otro lado; el origen está en el gateway o en su enlace.'},
+  '503': {titulo:'Service Unavailable (Servicio no disponible)', significado:'El servidor o gateway no puede atender ahora: está caído, saturado o sin troncales.', revisar:'Equivale al Q.931 causa 34 cuando no hay circuitos. Revisa el estado del gateway, la troncal y la capacidad.', origen:'Lo más probable es que el gateway esté caído, saturado o sin troncales libres; el origen suele estar en la troncal o en el gateway.'},
+  '504': {titulo:'Server Time-out (El servidor agotó el tiempo)', significado:'Un servidor en el camino no respondió a tiempo.', revisar:'Revisa el enlace hacia el siguiente salto (proxy o gateway).', origen:'Lo más probable es que un servidor en el camino no responda; el origen está en el enlace hacia el siguiente salto.'},
+  '600': {titulo:'Busy Everywhere (Ocupado en todas partes)', significado:'El destino está ocupado en todos lados.', revisar:'Como el 486, pero en toda la red: revisa desvíos.', origen:'Lo más probable es que el destino esté ocupado en toda la red; el origen está en el extremo llamado o en sus desvíos.'},
+  '603': {titulo:'Decline (Declinado)', significado:'El usuario rechazó la llamada.', revisar:'No es falla de red: el usuario la rechazó manualmente.', origen:'Lo más probable es que el usuario rechazara la llamada manualmente; el origen está en el extremo llamado.'},
+  '604': {titulo:'Does Not Exist Anywhere (No existe en ningún lado)', significado:'El número no existe en ninguna red.', revisar:'Número inexistente: verifica el marcado completo.', origen:'Lo más probable es que el número no exista en ninguna red; el origen está en el marcado.'}
+};
+
+const Q931_CAUSES = {
+  '1': {titulo:'Número no asignado', significado:'El número marcado no está asignado.', revisar:'Verifica el número marcado: dígitos de más o de menos, o el número no existe.', origen:'Lo más probable es que el número no esté provisionado o que el plan de marcado no lo complete; el origen suele estar en la PBX o en la configuración del gateway.'},
+  '16': {titulo:'Liberación normal', significado:'La llamada terminó de forma normal (alguien colgó).', revisar:'No es una falla: es el colgado normal de la llamada.', origen:'No es una falla: alguien colgó de forma normal.'},
+  '17': {titulo:'Usuario ocupado', significado:'El llamado está en otra llamada.', revisar:'El usuario está ocupado; revisa desvíos si siempre da ocupado.', origen:'Lo más probable es que el destino esté realmente ocupado en otra llamada; el origen está en el extremo llamado.'},
+  '18': {titulo:'Sin respuesta del usuario', significado:'El teléfono sonó pero nadie contestó.', revisar:'El usuario no contestó; el problema no es la red.', origen:'Lo más probable es que el usuario no estuviera disponible para contestar; el origen está en el extremo llamado, no en la red.'},
+  '19': {titulo:'Sin respuesta (alertado)', significado:'Sonó el teléfono pero no hubo respuesta en el tiempo de alerta.', revisar:'Igual que la 18: revisa si el usuario estaba disponible.', origen:'Lo más probable es que el usuario no contestara en el tiempo de alerta; el origen está en el extremo llamado.'},
+  '21': {titulo:'Llamada rechazada', significado:'El usuario rechazó la llamada.', revisar:'No es falla de red: el usuario la rechazó.', origen:'Lo más probable es que el usuario rechazara la llamada manualmente; el origen está en el extremo llamado.'},
+  '22': {titulo:'Número cambiado', significado:'El número marcado cambió; el nuevo número viene en el mensaje.', revisar:'Actualiza el número: el destino cambió de número.', origen:'Lo más probable es que el número haya cambiado y el contacto esté desactualizado; el origen está en el directorio o en la PBX.'},
+  '28': {titulo:'Formato de número inválido', significado:'El número está mal formado (incompleto o con formato incorrecto).', revisar:'Revisa el plan de marcado y los dígitos enviados.', origen:'Lo más probable es un error de marcado o del plan de marcado; el origen suele estar en la PBX o en el equipo que envía los dígitos.'},
+  '31': {titulo:'Normal, no especificado', significado:'Liberación normal sin más detalle.', revisar:'Fin normal de la llamada; sin acción.', origen:'No es una falla: liberación normal sin más detalle.'},
+  '34': {titulo:'Sin circuito disponible', significado:'No hay circuitos libres para cursar la llamada: todas las troncales ocupadas o la ruta caída.', revisar:'Revisa la ocupación de las troncales PRI, la capacidad contratada y el estado del enlace E1/T1. Su equivalente SIP es el 503.', origen:'Lo más probable es que todas las troncales PRI estén ocupadas, que la ruta esté caída o que el gateway no tenga canales libres; el origen suele estar en la troncal PRI o en el gateway.'},
+  '38': {titulo:'Red fuera de servicio', significado:'La red destino está fuera de servicio.', revisar:'Falla en la red del operador destino: escala al operador.', origen:'Lo más probable es una falla en la red del operador destino; el origen está fuera de tu red: escala al operador.'},
+  '41': {titulo:'Falla temporal', significado:'Falla temporal en la red.', revisar:'Reintenta: suele ser transitorio. Si se repite, revisa el enlace.', origen:'Lo más probable es una falla transitoria en la red o en el enlace; el origen suele estar en el enlace o en la red del operador.'},
+  '42': {titulo:'Congestión del equipo', significado:'El equipo de conmutación está congestionado.', revisar:'Saturación del equipo: revisa carga y capacidad.', origen:'Lo más probable es que el equipo de conmutación esté saturado; el origen está en la central o en el gateway sobrecargado.'},
+  '44': {titulo:'Circuito solicitado no disponible', significado:'El circuito pedido no está disponible.', revisar:'Revisa el circuito específico y su estado.', origen:'Lo más probable es que el circuito pedido esté ocupado o fuera de servicio; el origen está en el circuito o en la troncal.'},
+  '47': {titulo:'Recurso no disponible', significado:'Falta un recurso para completar la llamada.', revisar:'Revisa recursos del gateway o la central.', origen:'Lo más probable es que falte un recurso en el gateway o en la central (canal, DSP o licencia); el origen está en el gateway o en la central.'},
+  '58': {titulo:'Capacidad portadora no disponible', significado:'La red no puede dar el tipo de portadora pedida (por ejemplo, 64 kbps).', revisar:'Revisa el tipo de portadora configurado en el gateway.', origen:'Lo más probable es una portadora mal configurada en el gateway; el origen está en la configuración del gateway.'},
+  '88': {titulo:'Destino incompatible', significado:'El destino no es compatible con la llamada pedida.', revisar:'El equipo destino no soporta ese tipo de llamada.', origen:'Lo más probable es que el destino no soporte ese tipo de llamada (voz, datos, fax); el origen está en el equipo destino o en la configuración del gateway.'},
+  '96': {titulo:'Falta un elemento obligatorio', significado:'El mensaje Q.931 trae un elemento de información obligatorio ausente.', revisar:'Error de protocolo: revisa la versión y configuración del equipo.', origen:'Lo más probable es un error de protocolo entre equipos de distintos fabricantes o versiones; el origen está en la compatibilidad de protocolo.'},
+  '97': {titulo:'Tipo de mensaje no existente', significado:'Se recibió un tipo de mensaje que no existe o no está implementado.', revisar:'Incompatibilidad de protocolo entre equipos: revisa versiones.', origen:'Lo más probable es incompatibilidad de protocolo entre equipos; el origen está en las versiones de software de ambos lados.'},
+  '99': {titulo:'Elemento de información no existente', significado:'Se recibió un elemento de información desconocido.', revisar:'Incompatibilidad de protocolo: revisa versiones y configuración.', origen:'Lo más probable es incompatibilidad de protocolo entre equipos; el origen está en las versiones de software de ambos lados.'},
+  '127': {titulo:'Interfuncionamiento no especificado', significado:'Falla de interfuncionamiento sin detalle.', revisar:'Problema entre redes o equipos distintos: revisa la configuración del enlace.', origen:'Lo más probable es un problema de interfuncionamiento entre redes o equipos distintos; el origen está en el enlace entre ambos.'}
+};
+
+const Q931_MESSAGES = ['SETUP ACKNOWLEDGE','CONNECT ACKNOWLEDGE','RELEASE COMPLETE','CALL PROCEEDING','SETUP','PROGRESS','ALERTING','CONNECT','DISCONNECT','RELEASE','STATUS','INFORMATION','FACILITY'];
+
+const Q931_INFO = {
+  'SETUP': 'El terminal pide iniciar la llamada: lleva el número destino y el tipo de portadora.',
+  'SETUP ACKNOWLEDGE': 'La red confirma que recibió el SETUP y que todavía le falta información.',
+  'CALL PROCEEDING': 'La red está procesando la llamada: el SETUP fue válido y sigue su curso.',
+  'PROGRESS': 'La llamada avanza: puede venir audio temprano (tonos) antes de contestar.',
+  'ALERTING': 'El teléfono destino está sonando.',
+  'CONNECT': 'El otro lado contestó: la llamada queda establecida.',
+  'CONNECT ACKNOWLEDGE': 'El terminal confirma que recibió el CONNECT.',
+  'DISCONNECT': 'Una de las partes pide terminar la llamada. Trae la causa: ahí está el motivo.',
+  'RELEASE': 'Se libera el canal: el circuito queda libre para la siguiente llamada.',
+  'RELEASE COMPLETE': 'Liberación confirmada: el canal quedó libre y la llamada terminó del todo.',
+  'STATUS': 'Mensaje de estado: informa la situación de la llamada.',
+  'INFORMATION': 'Información adicional durante el establecimiento de la llamada.',
+  'FACILITY': 'Petición de un servicio suplementario (por ejemplo, desvío o identificación).'
+};
+
+const Q931_DEFAULT_DIR = {
+  'SETUP':'AtoB','SETUP ACKNOWLEDGE':'BtoA','CALL PROCEEDING':'BtoA','PROGRESS':'BtoA',
+  'ALERTING':'BtoA','CONNECT':'BtoA','CONNECT ACKNOWLEDGE':'AtoB','DISCONNECT':'BtoA',
+  'RELEASE':'AtoB','RELEASE COMPLETE':'BtoA','STATUS':'BtoA','INFORMATION':'AtoB','FACILITY':'AtoB'
+};
+
+const STATIC_PAYLOADS = {0:'PCMU (G.711u)',8:'PCMA (G.711a)',9:'G.722',18:'G.729',3:'GSM',4:'G.723',5:'DVI4',6:'DVI4',7:'LPC',10:'L16',11:'L16',13:'CN',14:'MPA',15:'G.728',26:'JPEG',31:'H.261',34:'H.263',101:'DTMF (telephone-event)'};
+
+/* ---------------- Utilidades ---------------- */
+
+function isPrivateIP(ip){
+  if (!ip) return false;
+  const p = ip.split('.').map(Number);
+  if (p.length !== 4 || p.some(isNaN)) return false;
+  if (p[0] === 10) return true;
+  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+  if (p[0] === 192 && p[1] === 168) return true;
+  return false;
+}
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ---------------- Limpieza de prefijos de log ---------------- */
+/* Los logs reales (SBC, PBX, gateways Dinstar/Grandstream/Synway/Aethra)
+   traen prefijos al inicio de cada línea: timestamps, IP:puerto, nivel de
+   log, etiquetas [SIP] o el nombre del equipo (syslog). Se limpian solo
+   para detectar los mensajes; el texto que pega el usuario no se modifica. */
+const LOG_METHODS = SIP_METHODS.join('|');
+const LOG_Q931 = Q931_MESSAGES.map(function(t){ return t.replace(/ /g, '\\s+'); }).join('|');
+const LOG_HEADERS = 'From|To|Call-ID|CSeq|Contact|Via|Content-Type|Content-Length|Max-Forwards|Allow|Supported|WWW-Authenticate|Authorization|Require|RAck|RSeq|Session-Expires|P-Early-Media|Calling|Called|Bearer|Channel|Cause';
+
+function stripLogPrefix(line){
+  let s = line.replace(/\x1b\[[0-9;]*m/g, ''), prev;
+  const msgStart = '(?:' + LOG_METHODS + ')\\b|SIP\\/2\\.0\\b|' + LOG_Q931 + '\\b';
+  const contentStart = msgStart + '|[A-Za-z][A-Za-z0-9-]*:|[vmosatbi]=|(?:recv|send)\\s+\\d+\\s+bytes\\b|$';
+  const hostGuard = '(?!(?:' + LOG_METHODS + '|SIP\\/2\\.0|' + LOG_Q931 + '|' + LOG_HEADERS + ')\\b)';
+  do {
+    prev = s;
+    // [2026-11-25 08:00:00.123] o [2026-11-25T08:00:00Z]
+    s = s.replace(/^\s*\[\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*/, '');
+    // 2026-11-25 08:00:00.123
+    s = s.replace(/^\s*\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '');
+    // 08:00:00.123
+    s = s.replace(/^\s*\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '');
+    // Nov 25 08:00:00 (syslog)
+    s = s.replace(/^\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s*/i, '');
+    // [SIP], [Q.931], [DINSTAR], [GW]... y niveles de FreeSWITCH ([DEBUG], [ERR], [NOTICE]...)
+    s = s.replace(/^\s*\[(?:SIP|Q\.?931|DINSTAR|GRANDSTREAM|SYNWAY|AETHRA|GW|PRI|ISDN|LOG|INFO|DEBUG|TRACE|ERROR|WARN|ERR|NOTICE|WARNING|CRIT|FATAL)[^\]]*\]\s*/i, '');
+    // archivo.c:línea de FreeSWITCH (sofia.c:1234, switch_channel.c:1075) — solo si sigue contenido de traza
+    s = s.replace(new RegExp('^\\s*[A-Za-z0-9_.-]+\\.(?:c|h|cpp|py|js|lua|xml)\\s*:\\s*\\d+\\s*(?=(' + contentStart + '))', 'i'), '');
+    // INFO: / DEBUG: / ERROR: al inicio
+    s = s.replace(/^\s*(?:INFO|DEBUG|TRACE|WARNING|ERROR|WARN|DBG|INF)\s*[:|\]]\s*/i, '');
+    // syslog con host + proceso[pid]: (gw-voz freeswitch[4600]: INVITE...) — solo si lo que sigue es contenido de traza
+    s = s.replace(new RegExp('^\\s*' + hostGuard + '[A-Za-z0-9_.-]+\\s+[A-Za-z0-9_.-]+\\[[^\\]]+\\]:\\s*(?=(' + contentStart + '))', 'i'), '');
+    // host[pid]: (syslog) — solo si lo que sigue es contenido de traza
+    s = s.replace(new RegExp('^\\s*' + hostGuard + '[A-Za-z0-9_.-]+\\[[^\\]]+\\]:\\s*(?=(' + contentStart + '))', 'i'), '');
+    // host SIP: / host Dinstar: — solo si lo que sigue es contenido de traza
+    s = s.replace(new RegExp('^\\s*' + hostGuard + '[A-Za-z0-9_.-]+\\s+(?:SIP|Q\\.?931|DINSTAR|GRANDSTREAM|SYNWAY|AETHRA|GW|PRI|ISDN)\\s*:\\s*(?=(' + contentStart + '))', 'i'), '');
+    // SIP: / Dinstar: sueltos al inicio (logs tipo "SIP: INVITE...")
+    s = s.replace(new RegExp('^\\s*(?:SIP|Q\\.?931|DINSTAR|GRANDSTREAM|SYNWAY|AETHRA|GW|PRI|ISDN)\\s*:\\s*(?=(' + contentStart + '))', 'i'), '');
+    // IP:puerto al inicio, con o sin destino (10.0.0.1:5060 -> 10.0.0.2:5060)
+    s = s.replace(new RegExp('^\\s*\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d{1,5})?\\s*(?:->|→|=>)?\\s*(?:\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d{1,5})?\\s*)?(?=(' + contentStart + '))', 'i'), '');
+    // nombre de equipo suelto (syslog: "gw-voz-01 INVITE...") — nunca si es inicio de mensaje o cabecera
+    s = s.replace(new RegExp('^\\s*' + hostGuard + '[A-Za-z0-9_.-]+\\s+(?=(' + contentStart + '))', 'i'), '');
+  } while (s !== prev);
+  return s;
+}
+
+/* ---------------- Logs de FreeSWITCH (sofia) ---------------- */
+/* Formato documentado (listas de FreeSWITCH, logs reales de sofia): el
+   mensaje SIP vive dentro de bloques recv/send, con una línea de guiones
+   que cierra el bloque:
+     recv 726 bytes from udp/[192.168.1.100]:5062 at 11:18:28.880410: ----...
+     INVITE sip:1020@192.168.1.100 SIP/2.0
+     ...cabeceras y SDP...
+     ----...
+     send 333 bytes to udp/[192.168.1.100]:5062 at 11:18:28.880719: ----...
+     SIP/2.0 100 Trying
+     ...
+   Cada línea puede venir envuelta en el prefijo propio de FreeSWITCH
+   (2026-11-25 08:10:01.123456 [DEBUG] sofia.c:1234) o en syslog
+   (Nov 25 08:10:01 host freeswitch[4600]:). El SIP crudo se extrae y se
+   alimenta al parser que ya existe; las líneas fuera de los bloques son
+   diagnósticos, no señalización. */
+const FS_BLOCK_HEAD = /^(recv|send)\s+\d+\s+bytes\s+(?:from|to)\s+\S+\s+at\s+[\d:.]+\s*:?\s*-*\s*$/i;
+const FS_DASH_LINE = /^-{10,}\s*$/;
+
+/* Recibe las líneas YA limpias (la limpieza se hace una sola vez en
+   parseTrace o en el wrapper extractFreeSwitch). */
+function extractFreeSwitchFromLines(lines){
+  const out = [];
+  let inBlock = false, dir = null, firstLine = false, isFS = false;
+  for (const clean of lines){
+    const t = clean.trim();
+    if (!inBlock){
+      const hm = t.match(FS_BLOCK_HEAD);
+      if (hm){
+        inBlock = true; isFS = true; firstLine = true;
+        dir = /^recv/i.test(hm[1]) ? 'FS-RECV' : 'FS-SEND';
+      }
+      continue;
+    }
+    if (FS_DASH_LINE.test(t)){ inBlock = false; dir = null; continue; }
+    const hm2 = t.match(FS_BLOCK_HEAD);
+    if (hm2){ isFS = true; firstLine = true; dir = /^recv/i.test(hm2[1]) ? 'FS-RECV' : 'FS-SEND'; continue; }
+    if (firstLine && t === '') continue; // líneas en blanco antes del mensaje
+    if (firstLine){ out.push(dir + ': ' + clean); firstLine = false; }
+    else out.push(clean);
+  }
+  return {sipText: out.join('\n'), isFS: isFS};
+}
+
+function extractFreeSwitch(text){
+  const lines = text.split(/\r?\n/).map(function(l){ return stripLogPrefix(l); });
+  const r = extractFreeSwitchFromLines(lines);
+  r.diagnostics = extractFreeSwitchDiagnostics(text);
+  return r;
+}
+
+/* Líneas de diagnóstico de FreeSWITCH que dicen algo útil aunque no haya
+   SIP. Todo como posible causa, nunca certeza. Las líneas agent_timer,
+   nta: timer y similares son ruido y se ignoran. */
+const FS_DIAGNOSTICS = [
+  {re:/TLS handshake failed/i,
+   texto:'Falló un apretón de manos TLS (TLS handshake failed) en el log.',
+   revisar:'Revisa los certificados TLS (vencidos, sin confianza o con un nombre distinto al dominio) y los cifrados y versiones de TLS aceptados, tanto en el equipo que intenta conectar como en el gateway o FreeSWITCH.',
+   origen:'Lo más probable es un problema de certificados o de cifrados TLS en el equipo que intenta conectar (certificado vencido, no confiable o versión de TLS no aceptada); el origen estaría en los certificados TLS o en la configuración TLS del gateway.'},
+  {re:/parse domain\b.*\bfailed/i,
+   texto:'FreeSWITCH no pudo interpretar el dominio (parse domain … failed).',
+   revisar:'Revisa la resolución DNS del dominio en el servidor donde corre FreeSWITCH y el nombre de dominio configurado en el perfil sofia y en el gateway.',
+   origen:'Lo más probable es un problema de DNS o de configuración del dominio en el gateway o en el perfil sofia de FreeSWITCH; el origen estaría en el DNS o en la configuración del dominio.'}
+];
+
+function extractFreeSwitchDiagnostics(text){
+  const found = [];
+  const seen = {};
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines){
+    const line = raw.replace(/\x1b\[[0-9;]*m/g, '');
+    for (let i = 0; i < FS_DIAGNOSTICS.length; i++){
+      if (seen[i]) continue;
+      if (FS_DIAGNOSTICS[i].re.test(line)){ seen[i] = true; found.push(FS_DIAGNOSTICS[i]); }
+    }
+  }
+  return found;
+}
+
+/* ---------------- Detección de formato ---------------- */
+
+/* Recibe las líneas YA limpias. */
+function detectFormatFromLines(lines){
+  const clean = lines.join('\n');
+  if (/SIP\/2\.0/i.test(clean)) return 'SIP';
+  if (new RegExp('^\\s*(' + SIP_METHODS.join('|') + ')\\s+\\S+\\s+SIP/2\\.0', 'im').test(clean)) return 'SIP';
+  const q = Q931_MESSAGES.some(function(t){
+    return new RegExp('\\b' + t.replace(/ /g,'\\s+') + '\\b', 'i').test(clean);
+  });
+  if (q) return 'Q931';
+  if (/cause\s*(value)?\s*[:=]?\s*\[?\d/i.test(clean)) return 'Q931';
+  return 'unknown';
+}
+
+function detectFormat(text){
+  return detectFormatFromLines(text.split(/\r?\n/).map(function(l){ return stripLogPrefix(l); }));
+}
+
+/* ---------------- Parser SIP ---------------- */
+
+/* Recibe las líneas YA limpias. */
+function parseSIPFromLines(lines){
+  const messages = [];
+  let cur = null, inSdp = false;
+  const reqRe = new RegExp('^\\s*(' + SIP_METHODS.join('|') + ')\\s+(\\S+)\\s+SIP/2\\.0', 'i');
+  const statusRe = /^\s*SIP\/2\.0\s+(\d{3})(?:\s+(.*))?$/i;
+  for (const raw of lines){
+    const line = raw.trim();
+    if (!line){ inSdp = true; continue; }
+    // Prefijo de dirección del log (TX:/RX:/SEND:/RECV:) antes del mensaje.
+    // En un log de FreeSWITCH, FS-RECV es lo que llega al FreeSWITCH
+    // (del equipo remoto hacia él) y FS-SEND lo que él envía.
+    let dirHint = null, fromFS = false;
+    const probe = line.replace(/^(TX|RX|SEND|RECV|FS-RECV|FS-SEND)\s*[:>]\s*/i, function(_, p){
+      fromFS = /^FS-/i.test(p);
+      dirHint = /^(TX|SEND|FS-RECV)$/i.test(p) ? 'AtoB' : 'BtoA';
+      return '';
+    });
+    let m = probe.match(reqRe);
+    if (m){
+      cur = {kind:'request', method:m[1].toUpperCase(), uri:m[2], dir:dirHint || 'AtoB', fs:fromFS, from:'', to:'', callId:'', cseq:'', contact:'', sdp:{media:'', mediaPort:null, mediaRejected:false, direction:'', connIP:'', codecs:[], rtpmap:{}}};
+      messages.push(cur); inSdp = false; continue;
+    }
+    m = probe.match(statusRe);
+    if (m){
+      cur = {kind:'response', code:m[1], reason:(m[2] || '').trim(), dir:dirHint || 'BtoA', fs:fromFS, from:'', to:'', callId:'', cseq:'', contact:'', sdp:{media:'', mediaPort:null, mediaRejected:false, direction:'', connIP:'', codecs:[], rtpmap:{}}};
+      messages.push(cur); inSdp = false; continue;
+    }
+    if (!cur) continue;
+    const hm = line.match(/^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$/);
+    if (hm && !inSdp){
+      const h = hm[1].toLowerCase(), v = hm[2];
+      if (h === 'from') cur.from = v;
+      else if (h === 'to') cur.to = v;
+      else if (h === 'call-id') cur.callId = v;
+      else if (h === 'cseq') cur.cseq = v;
+      else if (h === 'contact') cur.contact = v;
+      continue;
+    }
+    if (/^v=/.test(line)){ inSdp = true; continue; }
+    if (inSdp || /^m=|^c=|^a=/.test(line)){
+      if (/^m=/.test(line)){
+        cur.sdp.media = line.slice(2);
+        const mp = line.match(/^m=\w+\s+(\d+)/);
+        if (mp){
+          cur.sdp.mediaPort = parseInt(mp[1], 10);
+          if (cur.sdp.mediaPort === 0) cur.sdp.mediaRejected = true;
+        }
+      }
+      else if (/^c=/.test(line)){
+        const ip = line.match(/IP4\s+(\S+)/i);
+        if (ip) cur.sdp.connIP = ip[1];
+      }
+      else if (/^a=(inactive|sendonly|recvonly|sendrecv)\s*$/i.test(line)){
+        cur.sdp.direction = line.slice(2).trim().toLowerCase();
+      }
+      else if (/^a=rtpmap:/i.test(line)){
+        const rm = line.match(/a=rtpmap:(\d+)\s+(\S+)/i);
+        if (rm) cur.sdp.rtpmap[rm[1]] = rm[2];
+      }
+    }
+  }
+  for (const msg of messages){
+    if (msg.sdp.media){
+      const parts = msg.sdp.media.split(/\s+/);
+      const pts = parts.slice(3);
+      msg.sdp.codecs = pts.map(function(pt){
+        if (msg.sdp.rtpmap[pt]) return msg.sdp.rtpmap[pt].split('/')[0] + ' (' + pt + ')';
+        if (STATIC_PAYLOADS[pt]) return STATIC_PAYLOADS[pt] + ' (' + pt + ')';
+        return 'PT ' + pt;
+      });
+    }
+  }
+  // Si hay una llamada (INVITE), los OPTIONS son keepalives del SBC: se
+  // apartan para no ensuciar el flujo ni el conteo de Call-ID.
+  let optionsFiltered = 0;
+  let working = messages;
+  const hasInvite0 = messages.some(function(m){ return m.method === 'INVITE'; });
+  if (hasInvite0){
+    const before = messages.length;
+    working = messages.filter(function(m){
+      return !(m.method === 'OPTIONS' || (m.kind === 'response' && /OPTIONS/i.test(m.cseq || '')));
+    });
+    optionsFiltered = before - working.length;
+  }
+  // Call-ID distintos (sin contar OPTIONS): ¿viene más de una llamada?
+  const callOrder = [];
+  const callSet = {};
+  for (const m of working){
+    if (!m.callId || callSet[m.callId]) continue;
+    callSet[m.callId] = true;
+    callOrder.push(m.callId);
+  }
+  const invite0 = working.find(function(m){ return m.method === 'INVITE'; }) || null;
+  const analyzedCallId = (invite0 && invite0.callId) || callOrder[0] || (working[0] && working[0].callId) || '';
+  // Si hay más de una llamada, se analiza solo la del INVITE y se apartan
+  // los mensajes de las demás para no mezclar flujos.
+  let omittedOtherCalls = 0;
+  if (callOrder.length > 1 && analyzedCallId){
+    const beforeFilter = working.length;
+    working = working.filter(function(m){ return !m.callId || m.callId === analyzedCallId; });
+    omittedOtherCalls = beforeFilter - working.length;
+  }
+  // Retransmisiones: mismo método/código + mismo CSeq + mismo Call-ID (solo si hay CSeq o Call-ID)
+  const seenKeys = {};
+  for (const m of working){
+    if (!m.callId && !m.cseq) continue;
+    const key = (m.callId || '') + '|' + (m.method || m.code) + '|' + (m.cseq || '');
+    if (seenKeys[key]) m.retransmit = true;
+    else seenKeys[key] = true;
+  }
+  const firstOfCall = working.find(function(m){ return m.callId === analyzedCallId; }) || working[0] || {};
+  const invite = working.find(function(m){ return m.method === 'INVITE'; }) || null;
+  // El 200 OK sin SDP no negocia nada: el SDP válido puede venir en el 183.
+  // Este "answered" es el mismo que usa la cajita Media en diagnose
+  // (se devuelve en el resultado para que no se calcule dos veces distinto).
+  const answered = working.find(function(m){ return m.kind === 'response' && m.code === '200' && m.sdp.codecs.length; })
+    || working.find(function(m){ return m.kind === 'response' && m.code === '183' && m.sdp.codecs.length; }) || null;
+  return {
+    format:'SIP',
+    messages: working,
+    optionsFiltered: optionsFiltered,
+    multiCall: callOrder.length > 1 ? {total: callOrder.length, analyzed: analyzedCallId, others: callOrder.filter(function(id){ return id !== analyzedCallId; }), omittedMessages: omittedOtherCalls} : null,
+    actors: detectSipActors(working),
+    answered: answered,
+    keyData:{
+      callId: analyzedCallId || '—',
+      from: firstOfCall.from || '—',
+      to: firstOfCall.to || '—',
+      ofrecidos: invite && invite.sdp.codecs.length ? invite.sdp.codecs.join(', ') : '—',
+      contestados: answered && answered.sdp.codecs.length ? answered.sdp.codecs.join(', ') : '—'
+    }
+  };
+}
+
+function parseSIP(text){
+  return parseSIPFromLines(text.split(/\r?\n/).map(function(l){ return stripLogPrefix(l); }));
+}
+
+/* Detecta los actores del flujo a partir de la traza misma (sin inventar
+   topología): quién llama y con quién habla. En la red real de Marlon el
+   INVITE sale del gateway hacia el IMS (dominio ims...), y los OPTIONS
+   vienen de SBC (From: sip:SBC@... o parámetros Hpt= de Huawei). Si la
+   traza viene de un log de FreeSWITCH (bloques recv/send de sofia), el
+   lado B es FreeSWITCH y el lado A el equipo remoto que habla con él. */
+function detectSipActors(messages){
+  let a = 'Llamante', b = 'PBX / Gateway';
+  const isFS = messages.some(function(m){ return m.fs; });
+  const inv = messages.find(function(m){ return m.method === 'INVITE'; });
+  const firstResp = messages.find(function(m){ return m.kind === 'response'; });
+  const fromStr = inv ? (inv.from || '') : (messages[0] ? (messages[0].from || '') : '');
+  const toStr = inv ? (inv.to || '') : '';
+  const uriStr = inv ? (inv.uri || '') : '';
+  const contactResp = firstResp ? (firstResp.contact || '') : '';
+  const anySbc = messages.some(function(m){ return /sbc/i.test(m.from || '') || /hpt=/i.test(m.contact || ''); });
+  if (/sbc/i.test(fromStr)) a = 'SBC';
+  else if (/gw|gateway/i.test(fromStr)) a = 'Gateway';
+  if (/ims/i.test(uriStr) || /ims/i.test(toStr)) b = 'IMS';
+  else if (/sbc/i.test(contactResp) || /hpt=/i.test(contactResp)) b = 'SBC';
+  else if (/pbx/i.test(toStr)) b = 'PBX';
+  // Llamada saliente de un gateway hacia el IMS: el que invita es el gateway
+  if (b === 'IMS' && a === 'Llamante') a = 'Gateway';
+  if (anySbc && b === 'PBX / Gateway') b = 'SBC';
+  // Traza de un log de FreeSWITCH: el lado B es el propio FreeSWITCH
+  if (isFS){
+    b = 'FreeSWITCH';
+    if (a === 'Llamante') a = 'Equipo remoto';
+  }
+  return {a:a, b:b};
+}
+
+/* ---------------- Parser Q.931 ---------------- */
+
+function extractCause(line){
+  // Decimal: Cause value: 34 · Cause=34 · cause: 16 · Q.931 cause 34 ·
+  // Release Cause: 41 · cause 34 · Cause [82] - ... · Cause: 16 (Normal Clearing)
+  let m = line.match(/release\s+cause\s*[:=]?\s*\[?(\d{1,3})\b/i);
+  if (m) return m[1];
+  m = line.match(/cause\s*(?:value\s*)?[:=]?\s*\[?(?!0x)(\d{1,3})\b/i);
+  if (m) return m[1];
+  // Hexadecimal: Cause i = 0xA2 · cause 0x90 · Q.931 cause 0xA2 · Cause [0xA2]
+  // El octeto de causa suele traer el bit 0x80 prendido (0xA2 = 0x80 + 34)
+  m = line.match(/cause\s*(?:value|i|code)?\s*[:=]?\s*\[?0[xX]([0-9A-Fa-f]{1,2})\b/i);
+  if (m){
+    const v = parseInt(m[1], 16) & 0x7F;
+    if (v >= 1 && v <= 127) return String(v);
+  }
+  return null;
+}
+
+/* Recibe las líneas originales (para mostrar) y las YA limpias. */
+function parseQ931FromLines(origLines, lines){
+  const messages = [];
+  let lastMsg = null, gap = 0;
+  let calling = '', called = '', channel = '';
+  for (let li = 0; li < lines.length; li++){
+    const line = lines[li].trim();
+    const rawLine = origLines[li].trim();
+    if (!line){ gap++; continue; }
+    // Números y canal (ayudan a ubicar la llamada en el PRI; se conserva el primero hallado)
+    if (!calling){
+      const cm = line.match(/calling\s+(?:party\s+)?number\s*[:=]\s*([+\d][\d\s-]*)/i);
+      if (cm) calling = cm[1].trim();
+    }
+    if (!called){
+      const cm = line.match(/called\s+(?:party\s+)?number\s*[:=]\s*([+\d][\d\s-]*)/i);
+      if (cm) called = cm[1].trim();
+    }
+    if (!channel){
+      const cm = line.match(/(?:channel|timeslot|b-?channel)(?:\s+(?:id|identification|number))?\s*[:=]\s*([A-Za-z0-9\/\-]+)/i);
+      if (cm) channel = cm[1].trim();
+    }
+    let type = null;
+    for (const t of Q931_MESSAGES){
+      if (new RegExp('\\b' + t.replace(/ /g,'\\s+') + '\\b', 'i').test(line)){
+        // "Release Cause: 41" es una línea de causa, no un mensaje RELEASE
+        if (/^\s*release\s+cause\b/i.test(line)) continue;
+        type = t; break;
+      }
+    }
+    if (type){
+      let dir = null;
+      if (/\bTX\b|sent|\u2192|->|>>/.test(line)) dir = 'AtoB';
+      else if (/\bRX\b|received|\u2190|<-|<</.test(line)) dir = 'BtoA';
+      if (!dir) dir = Q931_DEFAULT_DIR[type] || 'BtoA';
+      lastMsg = {kind:'q931', type:type, dir:dir, cause:extractCause(line), raw:rawLine};
+      messages.push(lastMsg); gap = 0;
+      continue;
+    }
+    // Línea de causa suelta: pertenece al último mensaje que aún no tiene causa
+    if (/cause/i.test(line) && lastMsg && !lastMsg.cause && gap <= 3){
+      const c = extractCause(line);
+      if (c) lastMsg.cause = c;
+    }
+    gap++;
+  }
+  return {format:'Q931', messages:messages, actors:{a:'Terminal', b:'Red'}, keyData:{callId:'—', from:calling || '—', to:called || '—', canal:channel || '—', ofrecidos:'—', contestados:'—'}};
+}
+
+function parseQ931(text){
+  const origLines = text.split(/\r?\n/);
+  return parseQ931FromLines(origLines, origLines.map(function(l){ return stripLogPrefix(l); }));
+}
+
+/* ---------------- Punto de entrada ---------------- */
+
+function parseTrace(text){
+  if (!text || !text.trim()) return {format:'empty', messages:[], keyData:{}};
+  // Limpieza única: cada línea se limpia UNA sola vez aquí; los parsers
+  // reciben las líneas ya limpias (las originales se conservan solo para
+  // mostrarlas en Q.931). stripLogPrefix es idempotente, así que limpiar
+  // una vez da el mismo resultado que limpiarla varias veces.
+  const origLines = text.split(/\r?\n/);
+  const cleanLines = origLines.map(function(l){ return stripLogPrefix(l); });
+  // Logs de FreeSWITCH: el SIP vive dentro de bloques recv/send de sofia;
+  // las líneas de diagnóstico se extraen aparte y acompañan al resultado.
+  const fsResult = extractFreeSwitchFromLines(cleanLines);
+  const diagnostics = extractFreeSwitchDiagnostics(text);
+  if (fsResult.sipText && /SIP\/2\.0/i.test(fsResult.sipText)){
+    const parsed = parseSIPFromLines(fsResult.sipText.split(/\r?\n/));
+    parsed.freeswitch = true;
+    parsed.diagnostics = diagnostics;
+    return parsed;
+  }
+  const fmt = detectFormatFromLines(cleanLines);
+  if (fmt === 'SIP'){
+    const parsed = parseSIPFromLines(cleanLines);
+    if (diagnostics.length) parsed.diagnostics = diagnostics;
+    if (fsResult.isFS) parsed.freeswitch = true;
+    return parsed;
+  }
+  if (fmt === 'Q931') return parseQ931FromLines(origLines, cleanLines);
+  if (diagnostics.length) return {format:'diag', messages:[], diagnostics:diagnostics, freeswitch:true, keyData:{}};
+  return {format:'unknown', messages:[], keyData:{}};
+}
+
+/* ---------------- Explicación paso a paso ---------------- */
+
+function explainSIPMessage(msg){
+  if (msg.kind === 'request'){
+    let t = '<b>' + esc(msg.method) + '</b> — ' + (SIP_METHOD_INFO[msg.method] || 'Petición SIP.');
+    if (msg.method === 'INVITE' && msg.from) t += ' De <span class="tag">' + esc(msg.from.replace(/<|>/g,'')) + '</span> hacia <span class="tag">' + esc(msg.to.replace(/<|>/g,'')) + '</span>.';
+    if (msg.sdp.codecs.length) t += ' Ofrece códecs: ' + esc(msg.sdp.codecs.join(', ')) + '.';
+    if (msg.sdp.connIP) t += ' Media en ' + esc(msg.sdp.connIP) + '.';
+    return t;
+  }
+  const info = SIP_RESPONSES[msg.code];
+  let t = '<b>' + esc(msg.code) + ' ' + esc(msg.reason || (info ? info.titulo : '')) + '</b> — ' + (info ? info.significado : 'Respuesta SIP.');
+  if (msg.sdp.codecs.length) t += ' Contesta con códecs: ' + esc(msg.sdp.codecs.join(', ')) + '.';
+  if (msg.sdp.connIP) t += ' Media en ' + esc(msg.sdp.connIP) + '.';
+  return t;
+}
+
+function explainQ931Message(msg){
+  let t = '<b>' + esc(msg.type) + '</b> — ' + (Q931_INFO[msg.type] || 'Mensaje Q.931.');
+  if (msg.cause){
+    const c = Q931_CAUSES[msg.cause];
+    t += ' <b>Causa ' + esc(msg.cause) + (c ? ' (' + esc(c.titulo) + ')' : '') + ':</b> ' + (c ? esc(c.significado) : 'causa no catalogada en esta versión.');
+  }
+  return t;
+}
+
+/* ---------------- Diagnóstico ---------------- */
+
+function diagnose(parsed){
+  const out = {outcome:'warn', title:'', detail:'', checks:[], warnings:[], origen:'', media:null};
+  if (parsed.format === 'SIP'){
+    const msgs = parsed.messages;
+    const actorB = (parsed.actors && parsed.actors.b) || 'PBX / Gateway';
+    const hasInvite = msgs.some(function(m){ return m.method === 'INVITE'; });
+    const responses = msgs.filter(function(m){ return m.kind === 'response'; });
+    const finals = responses.filter(function(m){ return +m.code >= 400; });
+    const lastFinal = finals[finals.length - 1] || null;
+    const okInvite = responses.find(function(m){ return m.code === '200' && msgs.indexOf(m) > msgs.findIndex(function(x){ return x.method === 'INVITE'; }); });
+    const ackAfterOk = okInvite ? msgs.some(function(m, i){ return m.method === 'ACK' && i > msgs.indexOf(okInvite); }) : false;
+    const byeIdx = msgs.findIndex(function(m){ return m.method === 'BYE'; });
+    const byeOk = byeIdx >= 0 && responses.some(function(m){ return m.code === '200' && msgs.indexOf(m) > byeIdx; });
+
+    // Advertencias de SDP (sospechas, nunca certezas)
+    for (const m of msgs){
+      if (!m.sdp) continue;
+      if (m.sdp.connIP === '0.0.0.0'){
+        out.warnings.push('SDP con c=0.0.0.0 en el ' + (m.method || m.code) + ': sin media (llamada en espera o sin audio). Posible origen: lo más probable es que el terminal pusiera la llamada en espera o no ofreciera media.');
+      } else if (isPrivateIP(m.sdp.connIP)){
+        out.warnings.push('IP privada ' + m.sdp.connIP + ' en el SDP del ' + (m.method || m.code) + ': hay NAT en el camino. Sospecha de audio en un solo sentido — desde la señalización no se puede probar, solo sospechar. Posible origen: lo más probable es el NAT sin tratamiento adecuado (falta SBC/STUN o ALG mal configurado) en el router.');
+      }
+      if (m.sdp.mediaRejected){
+        out.warnings.push('m=audio 0 en el ' + (m.method || m.code) + ': media rechazada (puerto 0). El otro lado no acepta audio en esta sesión. Posible origen: lo más probable es que el equipo destino no soporte el medio ofrecido o lo tenga desactivado.');
+      }
+      if (m.sdp.direction === 'sendonly'){
+        out.warnings.push('a=sendonly en el ' + (m.method || m.code) + ': ese lado solo envía audio, no recibe. Sospecha de audio en un solo sentido o de llamada retenida — desde la señalización no se puede probar, solo sospechar.');
+      } else if (m.sdp.direction === 'recvonly'){
+        out.warnings.push('a=recvonly en el ' + (m.method || m.code) + ': ese lado solo recibe audio, no envía. Sospecha de audio en un solo sentido — desde la señalización no se puede probar, solo sospechar.');
+      } else if (m.sdp.direction === 'inactive'){
+        out.warnings.push('a=inactive en el ' + (m.method || m.code) + ': media retenida (ni envía ni recibe). Posible origen: lo más probable es que la llamada esté en espera.');
+      }
+    }
+    const invite = msgs.find(function(m){ return m.method === 'INVITE'; });
+    // El 200 OK sin SDP no negocia nada: el SDP válido puede venir en el 183.
+    // parseSIP ya elige ese mismo "answered" y lo deja en parsed.answered;
+    // se reutiliza aquí para que Datos clave y la cajita Media no diverjan
+    // nunca (el respaldo se recalcula solo si alguien llama a diagnose con
+    // un objeto armado a mano).
+    const answered = parsed.answered || responses.find(function(m){ return m.code === '200' && m.sdp.codecs.length; })
+      || responses.find(function(m){ return m.code === '183' && m.sdp.codecs.length; }) || null;
+    // SDP en 183 vs 200 OK: si ambos traen SDP y difieren, el SDP se
+    // renegoció entre el audio temprano y la respuesta final. Es una
+    // observación, no una falla por sí sola: no cambia el resultado.
+    let sdpCambio = '';
+    const early183 = responses.find(function(m){ return m.code === '183' && m.sdp.codecs.length; }) || null;
+    const final200 = responses.find(function(m){ return m.code === '200' && m.sdp.codecs.length; }) || null;
+    if (early183 && final200){
+      const resumenSdp = function(m){
+        return (m.sdp.codecs.join(', ') || 'sin códecs') + ' · IP ' + (m.sdp.connIP || '—') + ' · puerto ' + (m.sdp.mediaPort != null ? m.sdp.mediaPort : '—') + (m.sdp.direction && m.sdp.direction !== 'sendrecv' ? ' · ' + m.sdp.direction : '');
+      };
+      const e = resumenSdp(early183), f = resumenSdp(final200);
+      if (e !== f){
+        sdpCambio = 'En el 183 venía ' + e + ' y en el 200 OK quedó ' + f + '. Es solo una observación: no significa por sí sola que la llamada fallara.';
+      }
+    }
+    if (invite && answered && invite.sdp.codecs.length && answered.sdp.codecs.length){
+      const offered = invite.sdp.codecs.map(function(c){ return c.split(' (')[0]; });
+      const ans = answered.sdp.codecs.map(function(c){ return c.split(' (')[0]; });
+      const common = ans.filter(function(c){ return offered.indexOf(c) >= 0; });
+      if (!common.length){
+        out.warnings.push('Códec contestado (' + ans.join(', ') + ') distinto al ofrecido (' + offered.join(', ') + '): no hay códec común. Sospecha de audio en un solo sentido o sin audio — desde la señalización no se puede probar, solo sospechar. Posible origen: lo más probable es la configuración de códecs del gateway o de la PBX, sin transcodificación entre ambos lados.');
+      }
+    }
+    // Resumen de media para el primer triaje (cajita "Media")
+    function sdpInfo(m){
+      if (!m || !m.sdp) return null;
+      return {ip: m.sdp.connIP || '—', port: (m.sdp.mediaPort != null ? String(m.sdp.mediaPort) : '—'), codecs: m.sdp.codecs.length ? m.sdp.codecs.join(', ') : '—', dir: m.sdp.direction || 'sendrecv', rechazada: !!m.sdp.mediaRejected};
+    }
+    const mediaFlags = [];
+    for (const m of msgs){
+      if (!m.sdp) continue;
+      const quien = m.method || m.code;
+      if (m.sdp.connIP === '0.0.0.0') mediaFlags.push('c=0.0.0.0 en el ' + quien + ' (sin media)');
+      if (m.sdp.mediaRejected) mediaFlags.push('m=audio 0 en el ' + quien + ' (media rechazada)');
+      if (m.sdp.direction === 'sendonly') mediaFlags.push('a=sendonly en el ' + quien + ' (solo envía)');
+      else if (m.sdp.direction === 'recvonly') mediaFlags.push('a=recvonly en el ' + quien + ' (solo recibe)');
+      else if (m.sdp.direction === 'inactive') mediaFlags.push('a=inactive en el ' + quien + ' (media retenida)');
+      if (m.sdp.connIP && isPrivateIP(m.sdp.connIP)) mediaFlags.push('IP privada ' + m.sdp.connIP + ' en el ' + quien + ' (NAT)');
+    }
+    out.media = {ofrecidos: sdpInfo(invite), contestados: sdpInfo(answered), flags: mediaFlags, cambioSdp: sdpCambio || null};
+
+    if (byeOk){
+      out.outcome = out.warnings.length ? 'warn' : 'ok';
+      out.title = 'La llamada se completó normalmente';
+      out.detail = 'Hubo INVITE, contestación (200 OK), ACK y cierre con BYE + 200 OK. El flujo de señalización está completo.';
+    } else if (lastFinal){
+      const isCancel487 = lastFinal.code === '487';
+      out.outcome = isCancel487 ? 'warn' : 'fail';
+      const info = SIP_RESPONSES[lastFinal.code];
+      const isRegister = msgs.length && msgs[0].method === 'REGISTER';
+      out.title = isRegister
+        ? 'El registro falló con ' + lastFinal.code + ' ' + (lastFinal.reason || (info ? info.titulo : ''))
+        : (isCancel487
+            ? 'La llamada se canceló antes de contestar (487 Request Terminated)'
+            : 'La llamada murió con ' + lastFinal.code + ' ' + (lastFinal.reason || (info ? info.titulo : '')));
+      out.detail = info ? info.significado : 'La llamada terminó con un error SIP.';
+      if (info) out.checks.push(info.revisar);
+      if (info && info.origen) out.origen = info.origen;
+    } else if (hasInvite && !responses.length){
+      out.outcome = 'fail';
+      out.title = 'Sin respuesta al INVITE';
+      out.detail = 'Se envió el INVITE y nadie respondió: ni un 100 Trying. La petición no llegó o la respuesta se perdió.';
+      out.checks.push('Revisa que el destino (' + actorB + ') esté encendido y registrado.');
+      out.checks.push('Revisa firewall y NAT: el INVITE puede estar saliendo pero la respuesta no regresa.');
+      out.checks.push('Revisa la ruta: ¿el INVITE va a la IP y puerto correctos?');
+      if (actorB === 'IMS') out.checks.push('El destino es el IMS: revisa el enlace del gateway hacia el SBC y el registro SIP en el SBC.');
+      out.origen = 'Lo más probable es que el equipo destino esté caído o que la señalización no llegue: revisa la red, el firewall y que el gateway o la PBX estén respondiendo.';
+    } else if (okInvite && !ackAfterOk){
+      out.outcome = 'warn';
+      out.title = 'Contestaron, pero falta el ACK';
+      out.detail = 'Llegó el 200 OK al INVITE y no se ve el ACK. La llamada pudo establecerse, pero el llamante no confirmó.';
+      out.checks.push('Revisa que el ACK no se esté perdiendo por NAT o firewall.');
+      out.origen = 'Lo más probable es que el ACK se pierda por NAT o por un firewall en el camino, o que el terminal no lo envíe.';
+    } else if (okInvite){
+      out.outcome = out.warnings.length ? 'warn' : 'ok';
+      out.title = 'La llamada se estableció';
+      out.detail = 'El INVITE llegó al 200 OK y hubo ACK. La traza termina ahí: no se ve el cierre (BYE), quizá la traza está incompleta.';
+    } else {
+      out.outcome = 'warn';
+      out.title = 'Traza SIP parcial';
+      out.detail = 'Se reconoce como SIP, pero no se ve un INVITE completo. Puede ser un fragmento (por ejemplo, solo un REGISTER o un OPTIONS).';
+    }
+    // Pistas del log de FreeSWITCH (si la traza vino de un log sofia):
+    // un 5xx acompañado de una pista de TLS en el log apunta al TLS,
+    // no a una troncal genérica.
+    if (parsed.diagnostics && parsed.diagnostics.length){
+      for (const d of parsed.diagnostics){
+        out.warnings.push('En el log de FreeSWITCH también se ve: ' + d.texto + ' ' + d.origen);
+        out.checks.push(d.revisar);
+      }
+      if (lastFinal && ['500','502','503','504'].indexOf(lastFinal.code) >= 0){
+        out.origen = parsed.diagnostics[0].origen;
+      }
+    }
+    return out;
+  }
+
+  if (parsed.format === 'Q931'){
+    const msgs = parsed.messages;
+    const disc = msgs.find(function(m){ return m.type === 'DISCONNECT' && m.cause; }) || null;
+    const hasSetup = msgs.some(function(m){ return m.type === 'SETUP'; });
+    const hasConnect = msgs.some(function(m){ return m.type === 'CONNECT'; });
+    const relComplete = msgs.some(function(m){ return m.type === 'RELEASE COMPLETE'; });
+    if (disc){
+      const c = Q931_CAUSES[disc.cause];
+      if (disc.cause === '16' || disc.cause === '31'){
+        out.outcome = 'ok';
+        out.title = 'La llamada terminó de forma normal (causa ' + disc.cause + ')';
+        out.detail = c ? c.significado : 'Liberación normal.';
+      } else {
+        out.outcome = 'fail';
+        out.title = 'La llamada murió con causa Q.931 ' + disc.cause + (c ? ' (' + c.titulo + ')' : '');
+        out.detail = c ? c.significado : 'Causa no catalogada en esta versión.';
+        if (c) out.checks.push(c.revisar);
+        if (c && c.origen) out.origen = c.origen;
+      }
+    } else if (hasSetup && msgs.length === 1){
+      out.outcome = 'fail';
+      out.title = 'Sin respuesta al SETUP';
+      out.detail = 'Se envió el SETUP y la red no respondió nada: ni CALL PROCEEDING ni ALERTING.';
+      out.checks.push('Revisa el enlace PRI (E1/T1): capa 1 y capa 2 (Q.921) deben estar arriba.');
+      out.checks.push('Revisa que el gateway tenga la troncal configurada y el canal libre.');
+      out.origen = 'Lo más probable es que el enlace PRI esté caído (capa 1 o capa 2) o que el gateway no tenga la troncal configurada.';
+    } else if (hasConnect && relComplete){
+      out.outcome = 'ok';
+      out.title = 'La llamada se completó normalmente';
+      out.detail = 'Hubo SETUP, CONNECT y liberación completa (RELEASE COMPLETE). El flujo Q.931 está completo.';
+    } else if (hasConnect){
+      out.outcome = 'warn';
+      out.title = 'La llamada se estableció';
+      out.detail = 'Llegó el CONNECT. La traza termina ahí: no se ve el DISCONNECT, quizá la traza está incompleta.';
+    } else {
+      out.outcome = 'warn';
+      out.title = 'Traza Q.931 parcial';
+      out.detail = 'Se reconoce como Q.931, pero no se ve el flujo completo de una llamada.';
+    }
+    return out;
+  }
+
+  if (parsed.format === 'diag'){
+    out.outcome = 'warn';
+    out.title = 'El fragmento no trae mensajes SIP, pero trae pistas';
+    out.detail = 'Esto es un log de FreeSWITCH (sofia): solo trae líneas de diagnóstico internas, no mensajes SIP de una llamada. Aun así, las líneas que trae dicen algo útil: son pistas del posible origen, no certezas. Para ver el flujo de la llamada, pega el log con los bloques recv/send que traen el SIP dentro.';
+    for (const d of parsed.diagnostics || []){
+      out.warnings.push(d.texto + ' ' + d.origen);
+      out.checks.push(d.revisar);
+    }
+    if (parsed.diagnostics && parsed.diagnostics.length) out.origen = parsed.diagnostics[0].origen;
+    return out;
+  }
+  out.outcome = 'warn';
+  out.title = 'Formato no reconocido';
+  out.detail = 'No reconozco este formato. TraceNo\'j v1.4 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…) y logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro).';
+  return out;
+}
+
+/* ---------------- Casos del laboratorio ---------------- */
+
+const LAB_CASES = [
+  {
+    id:'caso1',
+    titulo:'Caso 1 — Llamada exitosa',
+    escenario:'La extensión 5550101 llama a la 5550202 dentro de la misma PBX. Todo sale bien: es el flujo normal que hay que aprender de memoria.',
+    pregunta:'¿Qué pasó en esta llamada?',
+    trace:
+'INVITE sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>\nCall-ID: abc123@203.0.113.10\nCSeq: 1 INVITE\nContact: <sip:5550101@203.0.113.10>\nContent-Type: application/sdp\n\nv=0\no=5550101 1 1 IN IP4 203.0.113.10\ns=-\nc=IN IP4 203.0.113.10\nt=0 0\nm=audio 5004 RTP/AVP 0 8\na=rtpmap:0 PCMU/8000\na=rtpmap:8 PCMA/8000\n\nSIP/2.0 100 Trying\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>\nCall-ID: abc123@203.0.113.10\nCSeq: 1 INVITE\n\nSIP/2.0 180 Ringing\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>;tag=x9y8z7\nCall-ID: abc123@203.0.113.10\nCSeq: 1 INVITE\n\nSIP/2.0 200 OK\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>;tag=x9y8z7\nCall-ID: abc123@203.0.113.10\nCSeq: 1 INVITE\nContact: <sip:5550202@203.0.113.20>\nContent-Type: application/sdp\n\nv=0\no=5550202 1 1 IN IP4 203.0.113.20\ns=-\nc=IN IP4 203.0.113.20\nt=0 0\nm=audio 6000 RTP/AVP 0\na=rtpmap:0 PCMU/8000\n\nACK sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>;tag=x9y8z7\nCall-ID: abc123@203.0.113.10\nCSeq: 1 ACK\n\nBYE sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>;tag=x9y8z7\nCall-ID: abc123@203.0.113.10\nCSeq: 2 BYE\n\nSIP/2.0 200 OK\nFrom: <sip:5550101@pbx.empresa.test>;tag=a1b2c3\nTo: <sip:5550202@pbx.empresa.test>;tag=x9y8z7\nCall-ID: abc123@203.0.113.10\nCSeq: 2 BYE',
+    respuesta:'<b>La llamada se completó normalmente.</b> El flujo de memoria es: INVITE → 100 Trying (ya lo tengo) → 180 Ringing (suena el teléfono) → 200 OK (contestaron) → ACK (confirmado) → BYE (cuelgan) → 200 OK (cierre confirmado). Además los códecs coincidieron: se ofreció PCMU y PCMA y se contestó PCMU. Si ves este flujo, no hay nada que arreglar. <b>Posible origen:</b> no hay falla que explicar en este caso: el flujo completó de principio a fin.'
+  },
+  {
+    id:'caso2',
+    titulo:'Caso 2 — Ocupado',
+    escenario:'La extensión 5550101 llama a la 5550202, pero esa extensión está en otra llamada. El usuario dice "siempre me sale ocupado".',
+    pregunta:'¿Dónde murió la llamada?',
+    trace:
+'INVITE sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=d4e5f6\nTo: <sip:5550202@pbx.empresa.test>\nCall-ID: def456@203.0.113.10\nCSeq: 1 INVITE\nContact: <sip:5550101@203.0.113.10>\nContent-Type: application/sdp\n\nv=0\no=5550101 1 1 IN IP4 203.0.113.10\ns=-\nc=IN IP4 203.0.113.10\nt=0 0\nm=audio 5004 RTP/AVP 0 8\na=rtpmap:0 PCMU/8000\na=rtpmap:8 PCMA/8000\n\nSIP/2.0 100 Trying\nFrom: <sip:5550101@pbx.empresa.test>;tag=d4e5f6\nTo: <sip:5550202@pbx.empresa.test>\nCall-ID: def456@203.0.113.10\nCSeq: 1 INVITE\n\nSIP/2.0 486 Busy Here\nFrom: <sip:5550101@pbx.empresa.test>;tag=d4e5f6\nTo: <sip:5550202@pbx.empresa.test>;tag=q1w2e3\nCall-ID: def456@203.0.113.10\nCSeq: 1 INVITE\n\nACK sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=d4e5f6\nTo: <sip:5550202@pbx.empresa.test>;tag=q1w2e3\nCall-ID: def456@203.0.113.10\nCSeq: 1 ACK',
+    respuesta:'<b>Murió en el 486 Busy Here.</b> La llamada sí llegó hasta el destino (hubo 100 Trying), pero la extensión 5550202 estaba ocupada. No es una falla de red ni del gateway: el 486 dice "el usuario está en otra llamada". Si el usuario dice que siempre le sale ocupado, revisa desvíos, llamada en espera desactivada o el teléfono descolgado. <b>Posible origen:</b> lo más probable es que la extensión 5550202 estuviera realmente ocupada o que el teléfono quedara descolgado; el origen está en el extremo llamado, no en la red ni en el gateway.'
+  },
+  {
+    id:'caso3',
+    titulo:'Caso 3 — Sin circuito (Q.931, causa 34)',
+    escenario:'Una llamada sale por el gateway PRI hacia la red pública y no conecta. En la traza del gateway se ve el DISCONNECT con causa 34. Es el caso clásico de "no hay troncales".',
+    pregunta:'¿Dónde murió la llamada?',
+    trace:
+'TX: SETUP\n  Called party number: 5550303\n  Bearer capability: Speech\nRX: CALL PROCEEDING\nRX: DISCONNECT\n  Cause value: 34 (No circuit/channel available)\nTX: RELEASE\nRX: RELEASE COMPLETE',
+    respuesta:'<b>Murió en el DISCONNECT con causa 34: sin circuito disponible.</b> El SETUP salió y la red lo aceptó (CALL PROCEEDING), pero no había ningún circuito libre para cursar la llamada: troncales ocupadas o la ruta caída. Qué revisar: ocupación de las troncales PRI, capacidad contratada y estado del enlace E1/T1. En SIP, esta misma falla se vería como un 503 Service Unavailable. <b>Posible origen:</b> lo más probable es que todas las troncales PRI estuvieran ocupadas o que la ruta estuviera caída; el origen está en la troncal PRI o en el gateway.'
+  },
+  {
+    id:'caso4',
+    titulo:'Caso 4 — Audio en un solo sentido',
+    escenario:'La llamada conecta y dura 10 segundos, pero solo se escucha un lado: el que llama oye, el llamado no. La señalización se ve "normal". Es la falla más odiada de VoIP.',
+    pregunta:'¿Por qué solo se escuchaba un lado?',
+    trace:
+'INVITE sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>\nCall-ID: ghi789@192.168.1.50\nCSeq: 1 INVITE\nContact: <sip:5550101@192.168.1.50>\nContent-Type: application/sdp\n\nv=0\no=5550101 1 1 IN IP4 192.168.1.50\ns=-\nc=IN IP4 192.168.1.50\nt=0 0\nm=audio 5004 RTP/AVP 0 8\na=rtpmap:0 PCMU/8000\na=rtpmap:8 PCMA/8000\n\nSIP/2.0 100 Trying\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>\nCall-ID: ghi789@192.168.1.50\nCSeq: 1 INVITE\n\nSIP/2.0 180 Ringing\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>;tag=z3x4c5\nCall-ID: ghi789@192.168.1.50\nCSeq: 1 INVITE\n\nSIP/2.0 200 OK\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>;tag=z3x4c5\nCall-ID: ghi789@192.168.1.50\nCSeq: 1 INVITE\nContact: <sip:5550202@203.0.113.20>\nContent-Type: application/sdp\n\nv=0\no=5550202 1 1 IN IP4 203.0.113.20\ns=-\nc=IN IP4 203.0.113.20\nt=0 0\nm=audio 6000 RTP/AVP 18\na=rtpmap:18 G729/8000\n\nACK sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>;tag=z3x4c5\nCall-ID: ghi789@192.168.1.50\nCSeq: 1 ACK\n\nBYE sip:5550202@pbx.empresa.test SIP/2.0\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>;tag=z3x4c5\nCall-ID: ghi789@192.168.1.50\nCSeq: 2 BYE\n\nSIP/2.0 200 OK\nFrom: <sip:5550101@pbx.empresa.test>;tag=g7h8i9\nTo: <sip:5550202@pbx.empresa.test>;tag=z3x4c5\nCall-ID: ghi789@192.168.1.50\nCSeq: 2 BYE',
+    respuesta:'<b>Hay dos sospechas en el SDP, y ojo: desde la señalización no se puede probar el audio en un solo sentido, solo sospechar.</b> Primera: el INVITE trae c=192.168.1.50, una IP privada: hay NAT en el camino y el audio (RTP) puede no llegar de regreso. Segunda: se ofreció PCMU/PCMA y se contestó solo G.729: no hay códec común. Cualquiera de las dos deja la llamada "conectada" en señalización pero muda en un sentido. Para confirmarlo hay que ver el RTP (Wireshark) o preguntar qué lado no escuchaba. Qué revisar: NAT y puertos RTP en el firewall, y que ambos lados tengan al menos un códec común activado. <b>Posible origen:</b> lo más probable es el NAT sin tratamiento adecuado (la IP privada 192.168.1.50 del INVITE lo delata) o la falta de un códec común; el origen estaría en el router/NAT o en la configuración de códecs. Desde la señalización es sospecha, no certeza.'
+  },
+  {
+    id:'caso5',
+    titulo:'Caso 5 — Registro rechazado (Dinstar, 401 y 403)',
+    escenario:'Un gateway Dinstar intenta registrarse en el IMS y no lo logra. La traza viene con prefijos de log reales: timestamps y etiquetas [SIP]. El primer 401 es normal (es el reto de autenticación), el problema es lo que viene después.',
+    pregunta:'¿Por qué el gateway no se registra?',
+    trace:
+'[2026-11-25 08:00:01.123] [SIP] TX: REGISTER sip:ims.empresa.test SIP/2.0\n[2026-11-25 08:00:01.123] From: <sip:5550404@ims.empresa.test>;tag=r1a2b3\n[2026-11-25 08:00:01.123] To: <sip:5550404@ims.empresa.test>\n[2026-11-25 08:00:01.123] Call-ID: reg555@203.0.113.30\n[2026-11-25 08:00:01.123] CSeq: 1 REGISTER\n[2026-11-25 08:00:01.123] Contact: <sip:5550404@203.0.113.30:5060>\n[2026-11-25 08:00:01.123] Content-Length: 0\n[2026-11-25 08:00:01.350] [SIP] RX: SIP/2.0 401 Unauthorized\n[2026-11-25 08:00:01.350] From: <sip:5550404@ims.empresa.test>;tag=r1a2b3\n[2026-11-25 08:00:01.350] To: <sip:5550404@ims.empresa.test>;tag=s9s9s9\n[2026-11-25 08:00:01.350] Call-ID: reg555@203.0.113.30\n[2026-11-25 08:00:01.350] CSeq: 1 REGISTER\n[2026-11-25 08:00:01.350] WWW-Authenticate: Digest realm="ims.empresa.test", nonce="abc123"\n[2026-11-25 08:00:01.350] Content-Length: 0\n[2026-11-25 08:00:01.400] [SIP] TX: REGISTER sip:ims.empresa.test SIP/2.0\n[2026-11-25 08:00:01.400] From: <sip:5550404@ims.empresa.test>;tag=r1a2b3\n[2026-11-25 08:00:01.400] To: <sip:5550404@ims.empresa.test>\n[2026-11-25 08:00:01.400] Call-ID: reg555@203.0.113.30\n[2026-11-25 08:00:01.400] CSeq: 2 REGISTER\n[2026-11-25 08:00:01.400] Authorization: Digest username="5550404", realm="ims.empresa.test", nonce="abc123", response="falsa123"\n[2026-11-25 08:00:01.400] Contact: <sip:5550404@203.0.113.30:5060>\n[2026-11-25 08:00:01.400] Content-Length: 0\n[2026-11-25 08:00:01.650] [SIP] RX: SIP/2.0 403 Forbidden\n[2026-11-25 08:00:01.650] From: <sip:5550404@ims.empresa.test>;tag=r1a2b3\n[2026-11-25 08:00:01.650] To: <sip:5550404@ims.empresa.test>;tag=s9s9s9\n[2026-11-25 08:00:01.650] Call-ID: reg555@203.0.113.30\n[2026-11-25 08:00:01.650] CSeq: 2 REGISTER\n[2026-11-25 08:00:01.650] Content-Length: 0',
+    respuesta:'<b>El registro murió en el 403 Forbidden.</b> El 401 Unauthorized del principio es normal: es el servidor pidiendo credenciales (el reto con nonce). El gateway respondió con el segundo REGISTER ya autenticado, y ahí vino el 403: las credenciales no pasaron o el usuario no tiene permiso para registrarse en ese servidor. No es un problema de red: el gateway sí llegó al servidor y el servidor sí respondió. Qué revisar: usuario y contraseña SIP en el gateway, que el usuario 5550404 exista en el servidor y tenga permiso de registro. <b>Posible origen:</b> lo más probable es que las credenciales estén mal o que el usuario no tenga permiso de registro en el SBC/IMS; el origen está en la configuración del gateway o en el alta del usuario.'
+  },
+  {
+    id:'caso6',
+    titulo:'Caso 6 — Tiempo agotado (408, estilo Grandstream/Synway)',
+    escenario:'Una llamada sale del gateway hacia la PBX y nunca llega a sonar. La traza viene en formato syslog (fecha, nombre del equipo y etiqueta SIP al inicio de cada línea), como los logs de Grandstream o Synway. Solo se ven el INVITE, un 100 Trying y luego un 408.',
+    pregunta:'¿Dónde murió la llamada?',
+    trace:
+'Nov 25 08:05:12 gw-voz-01 SIP: INVITE sip:5550606@pbx.empresa.test SIP/2.0\nNov 25 08:05:12 gw-voz-01 From: <sip:5550505@pbx.empresa.test>;tag=m1n2o3\nNov 25 08:05:12 gw-voz-01 To: <sip:5550606@pbx.empresa.test>\nNov 25 08:05:12 gw-voz-01 Call-ID: to555@203.0.113.40\nNov 25 08:05:12 gw-voz-01 CSeq: 1 INVITE\nNov 25 08:05:12 gw-voz-01 Contact: <sip:5550505@203.0.113.40>\nNov 25 08:05:12 gw-voz-01 Content-Type: application/sdp\nNov 25 08:05:12 gw-voz-01 \nNov 25 08:05:12 gw-voz-01 v=0\nNov 25 08:05:12 gw-voz-01 o=5550505 1 1 IN IP4 203.0.113.40\nNov 25 08:05:12 gw-voz-01 s=-\nNov 25 08:05:12 gw-voz-01 c=IN IP4 203.0.113.40\nNov 25 08:05:12 gw-voz-01 t=0 0\nNov 25 08:05:12 gw-voz-01 m=audio 5004 RTP/AVP 0 8\nNov 25 08:05:12 gw-voz-01 a=rtpmap:0 PCMU/8000\nNov 25 08:05:12 gw-voz-01 a=rtpmap:8 PCMA/8000\nNov 25 08:05:12 gw-voz-01 SIP: SIP/2.0 100 Trying\nNov 25 08:05:12 gw-voz-01 From: <sip:5550505@pbx.empresa.test>;tag=m1n2o3\nNov 25 08:05:12 gw-voz-01 To: <sip:5550606@pbx.empresa.test>\nNov 25 08:05:12 gw-voz-01 Call-ID: to555@203.0.113.40\nNov 25 08:05:12 gw-voz-01 CSeq: 1 INVITE\nNov 25 08:05:44 gw-voz-01 SIP: SIP/2.0 408 Request Timeout\nNov 25 08:05:44 gw-voz-01 From: <sip:5550505@pbx.empresa.test>;tag=m1n2o3\nNov 25 08:05:44 gw-voz-01 To: <sip:5550606@pbx.empresa.test>;tag=t7t7t7\nNov 25 08:05:44 gw-voz-01 Call-ID: to555@203.0.113.40\nNov 25 08:05:44 gw-voz-01 CSeq: 1 INVITE',
+    respuesta:'<b>Murió en el 408 Request Timeout.</b> El INVITE salió y llegó hasta un servidor (hubo 100 Trying), pero nadie respondió a tiempo: pasaron 32 segundos entre el INVITE (08:05:12) y el 408 (08:05:44). El destino no contestó o la respuesta se perdió en el camino. Qué revisar: que el destino (la PBX o el teléfono 5550606) esté encendido y registrado, que ningún firewall esté perdiendo paquetes SIP, y que la ruta del INVITE vaya a la IP y puerto correctos. <b>Posible origen:</b> lo más probable es que el destino esté caído o que un firewall esté perdiendo paquetes; el origen suele estar en la red o en el equipo destino.'
+  },
+  {
+    id:'caso7',
+    titulo:'Caso 7 — Sin servicio por TLS (FreeSWITCH, 503)',
+    escenario:'Un teléfono llama a través de FreeSWITCH hacia un proveedor por TLS. El log trae los bloques recv/send de sofia y una línea de error TLS. La llamada no sale del FreeSWITCH.',
+    pregunta:'¿Dónde murió la llamada y qué dice el log?',
+    trace:
+'2026-11-25 08:10:01.123456 [DEBUG] sofia.c:1234 recv 612 bytes from udp/[203.0.113.50]:5060 at 08:10:01.123456: ------------------------------------------------------------------------\nINVITE sip:5550808@pbx.ejemplo.test SIP/2.0\nVia: SIP/2.0/UDP 203.0.113.50:5060;branch=z9hG4bK-fs777\nFrom: <sip:5550707@pbx.ejemplo.test>;tag=p7p7p7\nTo: <sip:5550808@pbx.ejemplo.test>\nCall-ID: fs777@203.0.113.50\nCSeq: 1 INVITE\nContact: <sip:5550707@203.0.113.50:5060>\nContent-Type: application/sdp\nContent-Length: 140\n\nv=0\no=5550707 1 1 IN IP4 203.0.113.50\ns=-\nc=IN IP4 203.0.113.50\nt=0 0\nm=audio 5004 RTP/AVP 0 8\na=rtpmap:0 PCMU/8000\na=rtpmap:8 PCMA/8000\n------------------------------------------------------------------------\n2026-11-25 08:10:01.234567 [DEBUG] sofia.c:1234 send 312 bytes to udp/[203.0.113.50]:5060 at 08:10:01.234567: ------------------------------------------------------------------------\nSIP/2.0 100 Trying\nVia: SIP/2.0/UDP 203.0.113.50:5060;branch=z9hG4bK-fs777\nFrom: <sip:5550707@pbx.ejemplo.test>;tag=p7p7p7\nTo: <sip:5550808@pbx.ejemplo.test>\nCall-ID: fs777@203.0.113.50\nCSeq: 1 INVITE\nUser-Agent: FreeSWITCH-mod_sofia/1.10.11\nContent-Length: 0\n------------------------------------------------------------------------\n2026-11-25 08:10:02.345678 [ERR] sofia.c:5678 TLS handshake failed: 203.0.113.99\n2026-11-25 08:10:02.456789 [DEBUG] sofia.c:1234 send 356 bytes to udp/[203.0.113.50]:5060 at 08:10:02.456789: ------------------------------------------------------------------------\nSIP/2.0 503 Service Unavailable\nVia: SIP/2.0/UDP 203.0.113.50:5060;branch=z9hG4bK-fs777\nFrom: <sip:5550707@pbx.ejemplo.test>;tag=p7p7p7\nTo: <sip:5550808@pbx.ejemplo.test>;tag=e5e5e5\nCall-ID: fs777@203.0.113.50\nCSeq: 1 INVITE\nUser-Agent: FreeSWITCH-mod_sofia/1.10.11\nContent-Length: 0\n------------------------------------------------------------------------',
+    respuesta:'<b>Murió en el 503 Service Unavailable, y el log dice por qué.</b> El INVITE sí llegó a FreeSWITCH (hubo 100 Trying), así que el problema no está del lado del teléfono. Después vino la pista clave: <b>TLS handshake failed</b>. FreeSWITCH intentó abrir el tramo TLS hacia el proveedor y el apretón de manos falló, así que devolvió el 503 al teléfono. Qué revisar: los certificados TLS del proveedor y del FreeSWITCH (vencidos, sin confianza o con otro nombre) y los cifrados y versiones de TLS aceptados. <b>Posible origen:</b> lo más probable es un problema de certificados o de cifrados TLS en el tramo hacia el proveedor; el origen estaría en los certificados TLS o en la configuración TLS.'
+  }
+];
+
+if (typeof module !== 'undefined' && module.exports){
+  module.exports = {parseTrace, detectFormat, parseSIP, parseQ931, diagnose, explainSIPMessage, explainQ931Message, LAB_CASES, SIP_RESPONSES, Q931_CAUSES, isPrivateIP, extractCause, stripLogPrefix, detectSipActors, extractFreeSwitch, extractFreeSwitchDiagnostics};
+}
+</script>
+<script>
+/* ================= TraceNo'j — interfaz (DOM) ================= */
+
+(function(){
+  // ---- Pestañas ----
+  var tabBtns = document.querySelectorAll('.tabs button');
+  tabBtns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      tabBtns.forEach(function(b){ b.classList.remove('active'); });
+      document.querySelectorAll('.tabpane').forEach(function(p){ p.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.getAttribute('data-tab')).classList.add('active');
+    });
+  });
+
+  // ---- Laboratorio: render de casos ----
+  var labDiv = document.getElementById('casosLab');
+  LAB_CASES.forEach(function(caso){
+    var card = document.createElement('div');
+    card.className = 'card';
+    var h = document.createElement('h2');
+    h.textContent = caso.titulo;
+    var esc1 = document.createElement('p');
+    esc1.textContent = caso.escenario;
+    var pre = document.createElement('pre');
+    pre.className = 'trace';
+    pre.textContent = caso.trace;
+    var q = document.createElement('p');
+    q.innerHTML = '<b>Pregunta:</b> ' + esc(caso.pregunta);
+    var btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = 'Ver respuesta';
+    var resp = document.createElement('div');
+    resp.className = 'respuesta';
+    resp.innerHTML = caso.respuesta;
+    btn.addEventListener('click', function(){
+      var open = resp.classList.toggle('abierta');
+      btn.textContent = open ? 'Ocultar respuesta' : 'Ver respuesta';
+    });
+    card.appendChild(h); card.appendChild(esc1); card.appendChild(pre);
+    card.appendChild(q); card.appendChild(btn); card.appendChild(resp);
+    labDiv.appendChild(card);
+  });
+
+  // ---- Intérprete ----
+  var input = document.getElementById('traceInput');
+  var salida = document.getElementById('salida');
+  var aviso = document.getElementById('avisoFormato');
+  var select = document.getElementById('ejemploSelect');
+
+  LAB_CASES.forEach(function(caso){
+    var opt = document.createElement('option');
+    opt.value = caso.id;
+    opt.textContent = caso.titulo;
+    select.appendChild(opt);
+  });
+  select.addEventListener('change', function(){
+    var c = LAB_CASES.find(function(x){ return x.id === select.value; });
+    if (c) input.value = c.trace;
+  });
+  document.getElementById('btnLimpiar').addEventListener('click', function(){
+    input.value = ''; select.value = '';
+    salida.style.display = 'none'; aviso.style.display = 'none';
+  });
+
+  function labelMsg(msg){
+    if (msg.kind === 'request') return msg.method;
+    if (msg.kind === 'response') return msg.code + ' ' + (msg.reason || '');
+    return msg.type + (msg.cause ? ' · causa ' + msg.cause : '');
+  }
+
+  function renderLadder(parsed){
+    var a = (parsed.actors && parsed.actors.a) || (parsed.format === 'Q931' ? 'Terminal' : 'Llamante');
+    var b = (parsed.actors && parsed.actors.b) || (parsed.format === 'Q931' ? 'Red' : 'PBX / Gateway');
+    var html = '<div class="ladder-cols"><span>' + esc(a) + '</span><span>' + esc(b) + '</span></div>';
+    parsed.messages.forEach(function(msg){
+      var dir = msg.dir || (msg.kind === 'request' ? 'AtoB' : (msg.kind === 'response' ? 'BtoA' : msg.dir));
+      var cls = 'lr-line ' + (dir === 'AtoB' ? 'to-right' : 'to-left');
+      var fail = false, warn = false;
+      if (msg.kind === 'response' && +msg.code >= 400) fail = true;
+      if (msg.kind === 'q931' && msg.type === 'DISCONNECT' && msg.cause && msg.cause !== '16' && msg.cause !== '31') fail = true;
+      if (msg.sdp && msg.sdp.connIP && (msg.sdp.connIP === '0.0.0.0' || isPrivateIP(msg.sdp.connIP))) warn = true;
+      if (fail) cls += ' bad'; else if (warn) cls += ' warn';
+      if (msg.retransmit) cls += ' retrans';
+      var label = labelMsg(msg) + (msg.retransmit ? ' (retransmisión)' : '');
+      html += '<div class="lr"><span class="lr-side">' + esc(a) + '</span>' +
+        '<span class="' + cls + '"><i>' + esc(label) + '</i></span>' +
+        '<span class="lr-side">' + esc(b) + '</span></div>';
+    });
+    return html;
+  }
+
+  function buildDiagHtml(diag){
+    var dHtml = '<div class="diag ' + diag.outcome + '"><h3>' + esc(diag.title) + '</h3><p>' + esc(diag.detail) + '</p>';
+    if (diag.origen){
+      dHtml += '<p><b>🔍 Posible origen:</b> ' + esc(diag.origen) + '</p>';
+    }
+    if (diag.warnings.length){
+      dHtml += '<p><b>⚠ Sospechas (no certezas):</b></p><ul>';
+      diag.warnings.forEach(function(w){ dHtml += '<li>' + esc(w) + '</li>'; });
+      dHtml += '</ul>';
+    }
+    if (diag.checks.length){
+      dHtml += '<p><b>Qué revisar:</b></p><ul>';
+      diag.checks.forEach(function(c){ dHtml += '<li>' + esc(c) + '</li>'; });
+      dHtml += '</ul>';
+    }
+    dHtml += '</div>';
+    if (diag.media && (diag.media.ofrecidos || diag.media.contestados)){
+      var mb = '<div class="media-box"><h4>📡 Media (SDP) — primer triaje</h4>';
+      function mediaRow(titulo, info){
+        if (!info) return '';
+        return '<dt>' + titulo + '</dt><dd>IP ' + esc(info.ip) + ' · puerto ' + esc(info.port) + ' · ' + esc(info.codecs) + ' · dirección ' + esc(info.dir) + (info.rechazada ? ' · <b>media rechazada (puerto 0)</b>' : '') + '</dd>';
+      }
+      mb += '<dl class="kv">';
+      mb += mediaRow('Ofrecido', diag.media.ofrecidos);
+      mb += mediaRow('Contestado', diag.media.contestados);
+      mb += '</dl>';
+      if (diag.media.cambioSdp){
+        mb += '<p class="small"><b>Cambio de SDP entre el audio temprano (183) y la respuesta final (200 OK):</b> ' + esc(diag.media.cambioSdp) + '</p>';
+      }
+      if (diag.media.flags.length){
+        mb += '<p class="small"><b>Señales en el SDP:</b> ' + esc(diag.media.flags.join(' · ')) + '</p>';
+      } else {
+        mb += '<p class="small muted">Sin señales raras en el SDP: la media se negoció sin 0.0.0.0, sin puerto 0 y sin cambios de dirección.</p>';
+      }
+      mb += '</div>';
+      dHtml += mb;
+    }
+    return dHtml;
+  }
+
+  document.getElementById('btnInterpretar').addEventListener('click', function(){
+    var text = input.value;
+    var parsed = parseTrace(text);
+    aviso.style.display = 'none';
+    if (parsed.format === 'empty'){
+      aviso.innerHTML = '<b>No pegaste ninguna traza.</b> Pega el texto de la traza SIP o Q.931, o carga un ejemplo del desplegable.';
+      aviso.style.display = 'block';
+      salida.style.display = 'none';
+      return;
+    }
+    if (parsed.format === 'unknown' || !parsed.messages.length){
+      aviso.innerHTML = '<b>No reconozco este formato.</b> TraceNo\'j v1.4 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…) y logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro). Si tu traza es de otro formato, dime cuál es y la agrego en la siguiente versión.';
+      aviso.style.display = 'block';
+      salida.style.display = 'none';
+      return;
+    }
+    var diag = diagnose(parsed);
+    if (parsed.format === 'diag'){
+      document.getElementById('avisoMulti').style.display = 'none';
+      document.getElementById('ladder').innerHTML = '<p class="muted">Sin flujo de llamada: el fragmento no trae mensajes SIP, solo líneas de diagnóstico de FreeSWITCH. La escalera necesita mensajes SIP (INVITE, 180, 200 OK…).</p>';
+      document.getElementById('pasos').innerHTML = '<li>No hay mensajes SIP en este fragmento: las líneas son diagnósticos internos de FreeSWITCH (sofia), no la señalización de una llamada. Para ver el flujo, pega el log con los bloques <span class="tag">recv/send</span> que traen el SIP dentro.</li>';
+      document.getElementById('datosClave').innerHTML = '<dt>Formato</dt><dd>Log de FreeSWITCH (sofia) — solo diagnósticos</dd>';
+      document.getElementById('diagnostico').innerHTML = buildDiagHtml(diag);
+      salida.style.display = 'block';
+      salida.scrollIntoView({behavior:'smooth'});
+      return;
+    }
+    var avisoMulti = document.getElementById('avisoMulti');
+    if (parsed.multiCall && parsed.multiCall.total > 1){
+      var extraOpt = parsed.optionsFiltered ? ' Además se apartaron ' + parsed.optionsFiltered + ' mensajes OPTIONS.' : '';
+      avisoMulti.innerHTML = '<b>Esta captura trae ' + parsed.multiCall.total + ' llamadas (Call-ID distintos).</b> Se aisló y analizó únicamente el Call-ID <span class="tag">' + esc(parsed.multiCall.analyzed) + '</span> (se omitieron ' + parsed.multiCall.omittedMessages + ' mensajes de otras llamadas).' + extraOpt;
+      avisoMulti.style.display = 'block';
+    } else if (parsed.optionsFiltered){
+      avisoMulti.innerHTML = '<b>Nota:</b> se apartaron ' + parsed.optionsFiltered + ' mensajes OPTIONS (keepalives del SBC) para no ensuciar el flujo de la llamada.';
+      avisoMulti.style.display = 'block';
+    } else {
+      avisoMulti.style.display = 'none';
+    }
+    document.getElementById('ladder').innerHTML = renderLadder(parsed);
+    var pasosHtml = '';
+    parsed.messages.forEach(function(msg, i){
+      var txt = parsed.format === 'SIP' ? explainSIPMessage(msg) : explainQ931Message(msg);
+      pasosHtml += '<li><span class="tag">' + esc(labelMsg(msg)) + '</span> ' + txt + '</li>';
+    });
+    document.getElementById('pasos').innerHTML = pasosHtml;
+    var kd = parsed.keyData;
+    var kdHtml = '';
+    if (parsed.format === 'SIP'){
+      kdHtml += '<dt>Call-ID</dt><dd>' + esc(kd.callId) + '</dd>';
+      kdHtml += '<dt>De</dt><dd>' + esc(kd.from) + '</dd>';
+      kdHtml += '<dt>Para</dt><dd>' + esc(kd.to) + '</dd>';
+      kdHtml += '<dt>Códecs ofrecidos</dt><dd>' + esc(kd.ofrecidos) + '</dd>';
+      kdHtml += '<dt>Códecs contestados</dt><dd>' + esc(kd.contestados) + '</dd>';
+    } else {
+      kdHtml += '<dt>Formato</dt><dd>Q.931 (PRI / ISDN)</dd>';
+      kdHtml += '<dt>Mensajes</dt><dd>' + parsed.messages.length + ' en la traza</dd>';
+      if (kd.from && kd.from !== '—') kdHtml += '<dt>Llama</dt><dd>' + esc(kd.from) + '</dd>';
+      if (kd.to && kd.to !== '—') kdHtml += '<dt>Llamado</dt><dd>' + esc(kd.to) + '</dd>';
+      if (kd.canal && kd.canal !== '—') kdHtml += '<dt>Canal / timeslot</dt><dd>' + esc(kd.canal) + '</dd>';
+    }
+    document.getElementById('datosClave').innerHTML = kdHtml;
+    document.getElementById('diagnostico').innerHTML = buildDiagHtml(diag);
+    salida.style.display = 'block';
+    salida.scrollIntoView({behavior:'smooth'});
+  });
+})();
+</script>
+</body>
+</html>
