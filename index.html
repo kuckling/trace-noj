@@ -857,7 +857,13 @@ function parseQ931FromLines(origLines, lines){
     }
     gap++;
   }
-  return {format:'Q931', messages:messages, actors:{a:'Terminal', b:'Red'}, keyData:{callId:'—', from:calling || '—', to:called || '—', canal:channel || '—', ofrecidos:'—', contestados:'—'}};
+  // Log de gateway (Dinstar mpe_q931, Synway): el lado izquierdo es el
+  // propio equipo que escribe el log, que puede ser lado usuario o lado
+  // red del E1; "Terminal"/"Red" no siempre aplican.
+  const isGatewayLog = origLines.some(function(l){
+    return /mpe_q931/i.test(l) || /ISDN\s*\(User\)/i.test(l) || /\bGWS_[A-Z_]+/i.test(l);
+  });
+  return {format:'Q931', messages:messages, actors: isGatewayLog ? {a:'Gateway (local)', b:'Lado remoto del E1'} : {a:'Terminal', b:'Red'}, keyData:{callId:'—', from:calling || '—', to:called || '—', canal:channel || '—', ofrecidos:'—', contestados:'—'}};
 }
 
 function parseQ931(text){
@@ -944,8 +950,48 @@ function explainSIPMessage(msg){
   return t;
 }
 
-function explainQ931Message(msg){
-  let t = '<b>' + esc(msg.type) + '</b> — ' + (Q931_INFO[msg.type] || 'Mensaje Q.931.');
+/* El texto de cada mensaje Q.931 depende de quién lo envía (su flecha):
+   en una llamada entrante el SETUP llega desde la red y el CALL
+   PROCEEDING lo envía el gateway, al revés que en una saliente. Los
+   textos neutros (DISCONNECT, RELEASE...) no cambian con la dirección. */
+function q931Sender(actors, dir){
+  const disp = dir === 'AtoB' ? (actors && actors.a) || 'Terminal' : (actors && actors.b) || 'Red';
+  if (/^gateway/i.test(disp)) return {art:'El', lc:'gateway (local)'};
+  if (/^lado remoto/i.test(disp)) return {art:'El', lc:'lado remoto del E1'};
+  if (/^terminal/i.test(disp)) return {art:'El', lc:'terminal'};
+  return {art:'La', lc:'red'};
+}
+
+function explainQ931Message(msg, actors){
+  const dir = msg.dir || 'AtoB';
+  const S = q931Sender(actors, dir);
+  let info;
+  switch(msg.type){
+    case 'SETUP':
+      info = dir === 'AtoB'
+        ? S.art + ' ' + S.lc + ' pide iniciar la llamada: lleva el número destino y el tipo de portadora.'
+        : 'Llega una llamada desde ' + S.art.toLowerCase() + ' ' + S.lc + ': trae el número destino y el tipo de portadora.';
+      break;
+    case 'SETUP ACKNOWLEDGE':
+      info = S.art + ' ' + S.lc + ' confirma que recibió el SETUP y que todavía le falta información.';
+      break;
+    case 'CALL PROCEEDING':
+      info = dir === 'AtoB'
+        ? S.art + ' ' + S.lc + ' aceptó el SETUP y está procesando la llamada.'
+        : S.art + ' ' + S.lc + ' está procesando la llamada: el SETUP fue válido y sigue su curso.';
+      break;
+    case 'CONNECT':
+      info = dir === 'AtoB'
+        ? S.art + ' ' + S.lc + ' contestó: la llamada queda establecida.'
+        : 'El otro lado contestó: la llamada queda establecida.';
+      break;
+    case 'CONNECT ACKNOWLEDGE':
+      info = S.art + ' ' + S.lc + ' confirma que recibió el CONNECT.';
+      break;
+    default:
+      info = Q931_INFO[msg.type] || 'Mensaje Q.931.';
+  }
+  let t = '<b>' + esc(msg.type) + '</b> — ' + info;
   if (msg.cause){
     const c = Q931_CAUSES[msg.cause];
     t += ' <b>Causa ' + esc(msg.cause) + (c ? ' (' + esc(c.titulo) + ')' : '') + ':</b> ' + (c ? esc(c.significado) : 'causa no catalogada en esta versión.');
@@ -969,6 +1015,18 @@ function diagnose(parsed){
     const isRegister = msgs.length && msgs[0].method === 'REGISTER';
     const responses = msgs.filter(function(m){ return m.kind === 'response'; });
     const finals = responses.filter(function(m){ return +m.code >= 400; });
+    // La llamada empieza a mitad: el primer mensaje de la llamada
+    // analizada es una respuesta (1xx/2xx) y no se ve el INVITE. Típico
+    // de Synway: el log no registra el INVITE que llega, solo el cambio
+    // de estado del canal. Una línea, tono neutro, para que el técnico
+    // no crea que la traza está cortada o que la herramienta falló.
+    // Un flujo que empieza con una petición (INVITE, REGISTER...) no es
+    // mitad de llamada: ahí no hay nota.
+    const first = msgs[0];
+    if (first && first.kind === 'response' && +first.code >= 100 && +first.code < 300){
+      const etiq = (first.code + ' ' + (first.reason || '')).trim();
+      out.midCallNote = 'Este log no muestra el INVITE: la llamada empieza en el ' + etiq + '.';
+    }
     // Reto de autenticación: un 401/407 no es el final si después vino un
     // reintento (nuevo INVITE/REGISTER) que funcionó. Solo cuenta como final
     // el error que viene DESPUÉS de la última petición que inicia el diálogo.
@@ -1216,7 +1274,7 @@ function diagnose(parsed){
   }
   out.outcome = 'warn';
   out.title = 'Formato no reconocido';
-  out.detail = 'No reconozco este formato. TraceNo\'j v1.8 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…), logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro) y logs de gateways Dinstar (mpe_q931) y Synway.';
+  out.detail = 'No reconozco este formato. TraceNo\'j v1.9 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…), logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro) y logs de gateways Dinstar (mpe_q931) y Synway.';
   return out;
 }
 
@@ -1482,6 +1540,11 @@ if (typeof module !== 'undefined' && module.exports){
     if (parsed.mixed){
       avisoTxt += (avisoTxt ? '<br>' : '') + '<b>Este log trae SIP y Q.931:</b> cambia el formato para ver la otra pata.';
     }
+    // La llamada empieza a mitad (sin INVITE): se avisa para que el
+    // técnico no crea que la traza está cortada.
+    if (diag.midCallNote){
+      avisoTxt += (avisoTxt ? '<br>' : '') + '<b>Nota:</b> ' + esc(diag.midCallNote);
+    }
     if (avisoTxt){
       avisoMulti.innerHTML = avisoTxt;
       avisoMulti.style.display = 'block';
@@ -1491,7 +1554,7 @@ if (typeof module !== 'undefined' && module.exports){
     document.getElementById('ladder').innerHTML = renderLadder(parsed);
     var pasosHtml = '';
     parsed.messages.forEach(function(msg, i){
-      var txt = parsed.format === 'SIP' ? explainSIPMessage(msg) : explainQ931Message(msg);
+      var txt = parsed.format === 'SIP' ? explainSIPMessage(msg) : explainQ931Message(msg, parsed.actors);
       pasosHtml += '<li><span class="tag">' + esc(labelMsg(msg)) + '</span> ' + txt + '</li>';
     });
     document.getElementById('pasos').innerHTML = pasosHtml;
@@ -1538,7 +1601,7 @@ if (typeof module !== 'undefined' && module.exports){
       var extra = '';
       if (ultimoFormato === 'Q931') extra = ' Forzaste el formato Q.931 y no se encontró ningún mensaje Q.931 en el texto. Prueba con Automático o revisa que el texto traiga SETUP, DISCONNECT o una causa.';
       if (ultimoFormato === 'SIP') extra = ' Forzaste el formato SIP y no se encontró ningún mensaje SIP en el texto. Prueba con Automático.';
-      aviso.innerHTML = '<b>No reconozco este formato.</b> TraceNo\'j v1.8 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…), logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro) y logs de gateways Dinstar (mpe_q931) y Synway.' + extra + ' Si tu traza es de otro formato, dime cuál es y la agrego en la siguiente versión.';
+      aviso.innerHTML = '<b>No reconozco este formato.</b> TraceNo\'j v1.9 entiende trazas SIP (texto con INVITE, 180, 200 OK…), trazas Q.931 (SETUP, ALERTING, DISCONNECT con causa…), logs de FreeSWITCH (bloques recv/send de sofia con el SIP dentro) y logs de gateways Dinstar (mpe_q931) y Synway.' + extra + ' Si tu traza es de otro formato, dime cuál es y la agrego en la siguiente versión.';
       aviso.style.display = 'block';
       salida.style.display = 'none';
       return;
